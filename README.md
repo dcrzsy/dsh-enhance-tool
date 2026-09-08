@@ -3,7 +3,7 @@
 DeepSeek Harness (`dsh`) web 界面增强插件 — 润色、提示词库、预测回复、宽度/字号设置、MCP 与定时自动化面板。
 
 - **安装形态**：100% 插件注入（slot / shell.overlay / settings / sessionTitle 官方机制），**零 bundle 补丁**
-- **兼容版本**：`dsh >= 0.1.0-rc.7`（已实测 0.1.1-rc.2）
+- **兼容版本**：`dsh >= 0.1.0-rc.7`（已实测 `0.1.1-rc.2`、`0.1.2-rc.1`）
 - **许可证**：MIT
 
 ---
@@ -98,15 +98,17 @@ fuser -k 3080/tcp && nohup dsh web &   # 重启 dsh web
 
 ### 版本锁定声明
 
-本插件的 **布局增强**（AI 消息无背景、用户气泡自适应、长消息折叠、面板让位、宽度设置）通过运行时 CSS 注入实现，选择器依赖 dsh 客户端 bundle 的 **CSS-in-JS 哈希类名**（如 `wSkVaW_*` / `gdEzaW_*` / `nArs4W_*`）。这些类名随 dsh 每次构建可能变化。
+本插件的 **布局增强**（AI 消息无背景、用户气泡自适应、长消息折叠、面板让位、宽度设置）通过运行时 CSS 注入实现。用户消息相关选择器已改为**哈希无关**的后缀匹配（`[class*=_userStack]` / `[class*=_bubble]` / `[class*=_userRow]`），因此不受 dsh 0.1.2 把用户气泡从 `dsh-client-ui-conversation` 迁到 `dsh-client-ui-chat`（哈希前缀 `gdEzaW_*` → `Sixlwa_*`）的影响；其余布局选择器仍依赖 dsh 客户端 bundle 的 **CSS-in-JS 哈希类名**（如 `wSkVaW_*` / `pXSMma_*` / `VOzbGW_*` / `nArs4W_*`）。这些类名随 dsh 每次构建可能变化。
 
-- **实测版本**：`0.1.0-rc.7`、`0.1.1-rc.2`
+- **实测版本**：`0.1.0-rc.7`、`0.1.1-rc.2`、`0.1.2-rc.1`
 - **布局增强失效表现**：安装后 AI/用户消息样式无变化（无错误提示，功能静默不生效）
 - **处理方式**：布局失效时，其余功能（润色 / 提示词库 / 建议条 / MCP / 自动化 / 标题）不受影响；请提交 issue 附上你的 dsh 版本与 `document.querySelector('*[class]').className` 中对应的消息区类名前缀，我们会更新注入选择器。
 
 ### 其他已知问题
 
 - **dsh 0.1.1-rc.2 的 modlens 适配器缺少 `prepareCall`**：插件启动时自动为缺失的适配器补丁（包装 `stream` 实现），使 `/polish`、`/suggest`、标题生成直接使用**用户会话选择的模型**；若补丁不可用则自动 fallback 到内置 `deepseek-official`。
+- **dsh 0.1.2 起 web 端需要认证**：直接访问 `http://127.0.0.1:3080/` 会返回 401，请使用启动日志中打印的 `http://127.0.0.1:3080/?token=...`（换取 cookie 后即可正常访问）。
+- **dsh 0.1.2 的用户气泡结构变化**：文本由块级 `div` 改为内联 `span`，折叠逻辑改为裁剪气泡本体（高度 = 5 行 + 气泡内边距），展开按钮挂在气泡外的 `userStack` 上以免被 `overflow:hidden` 裁掉。
 - **会话标题 provider** 需要 `@deepseek-ai/dsh-session-title-llm`（install.sh 自动链接）。
 
 ---
