@@ -1,6 +1,6 @@
 {
   "name": "dsh-enhance-tool",
-  "version": "0.8.6",
+  "version": "0.9.0",
   "private": false,
   "type": "module",
   "main": "lib/index.js",
@@ -29,7 +29,7 @@
     }
   },
   "license": "MIT",
-  "description": "DeepSeek Harness (dsh) web UI enhancer — polish, prompt library, suggested replies, width/font settings, MCP & automation panels.",
+  "description": "DeepSeek Harness (dsh) web UI enhancer — polish, prompt library, suggested replies, message toolbars, tool-call timings, width/font/sidebar settings.",
   "homepage": "https://github.com/dcrzsy/dsh-enhance-tool",
   "repository": {
     "type": "git",

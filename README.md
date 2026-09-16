@@ -1,6 +1,6 @@
 # dsh-enhance-tool
 
-DeepSeek Harness (`dsh`) web 界面增强插件 — 润色、提示词库、预测回复、宽度/字号设置、MCP 与定时自动化面板。
+DeepSeek Harness (`dsh`) web 界面增强插件 — 润色、提示词库、预测回复、消息工具条常显、工具调用耗时、宽度/字号/侧栏缩放。
 
 - **安装形态**：100% 插件注入（slot / shell.overlay / settings / sessionTitle 官方机制），**零 bundle 补丁**
 - **兼容版本**：`dsh >= 0.1.0-rc.7`（已实测 `0.1.1-rc.2`、`0.1.2-rc.1`、`0.1.5-rc.2`）
@@ -79,18 +79,7 @@ fuser -k 3080/tcp && nohup dsh web &   # 重启 dsh web
 - 自定义标题 provider（所有消息触发）+ **创建时间戳后缀**（`-YYYYMMDDHHmmss`）
 - 自动禁用官方 `session-title-llm`（通过 bundle.patch）
 
-### 4. MCP 服务器管理（侧边栏 → 面板）
-
-- 列表 / 添加 / 移除 `dsh-mcp-client` 服务器条目（stdio / http）
-- **合并写入** `~/.dsh/profiles/web/cordis.patch.yml`，保留用户其他配置，dsh 热应用
-
-### 5. 定时自动化任务（侧边栏 → 面板）
-
-- 任务字段：任务名 / 工作区 / 提示词 / 执行频率（分钟）
-- 到点自动新建会话并发送预设提示词（spawn 子代理）
-- 运行历史（时间 / 成功失败 / 失败原因 / 会话 ID），持久化 `enhancer-tasks.json`
-
-### 6. UI 修复
+### 4. UI 修复
 
 - **hero 菜单 overlay 修复**：下拉菜单覆盖输入框时自动限高滚动（不影响模型选择等短菜单）
 
@@ -104,7 +93,7 @@ fuser -k 3080/tcp && nohup dsh web &   # 重启 dsh web
 
 - **实测版本**：`0.1.0-rc.7`、`0.1.1-rc.2`、`0.1.2-rc.1`、`0.1.5-rc.2`
 - **布局增强失效表现**：安装后 AI/用户消息样式无变化（无错误提示，功能静默不生效）
-- **处理方式**：布局失效时，其余功能（润色 / 提示词库 / 建议条 / MCP / 自动化 / 标题）不受影响；请提交 issue 附上你的 dsh 版本与 `document.querySelector('*[class]').className` 中对应的消息区类名前缀，我们会更新注入选择器。
+- **处理方式**：布局失效时，其余功能（润色 / 提示词库 / 建议条 / 标题 / 消息工具条 / 工具耗时）不受影响；请提交 issue 附上你的 dsh 版本与 `document.querySelector('*[class]').className` 中对应的消息区类名前缀，我们会更新注入选择器。
 
 ### 其他已知问题
 
@@ -173,29 +162,15 @@ fuser -k 3080/tcp && nohup dsh web &   # 重启 dsh web
 
 ---
 
-## 0.1.5 host 侧行为体检（2026-09 实测）
+## 已移除的功能：MCP 服务器管理、定时自动化（0.9.0）
 
-client 侧靠选择器命中就能验证，host 侧（`lib/index.js`：路由 / 定时任务 / MCP 写入 / 标题 provider）只能靠**真的调接口 + 离线不变量测试**。这一轮发现 3 个真问题：
+这两个面板曾经由本插件提供（侧栏底部的「MCP」「自动化」入口 + `POST /enhancer/enhancer-api` 路由 + `enhancer-tasks.json` / profile `cordis.patch.yml` 写入）。0.9.0 起**整体移除**，原因：
 
-| 问题 | 症状（实测） | 修法 |
-|---|---|---|
-| **profile 文件写入被 fs 沙箱拒绝** | `mcp/apply` 与 `tasks/create` 全部返回 `cannot write "~/.dsh/profiles/web/…": file access denied under workspace-write mode`；两个面板看起来正常但**存不进去**（读取正常，所以列表是空的但没报错） | 这两个文件在 `$DSH_HOME/profiles/web` 下、位于所有 workspace 之外，而 0.1.5 的 `ctx.fs` 实施 workspace-write 沙箱。改为用 `node:fs`（核心包 `dsh-session-persistence-jsonl` 写会话日志也是这么做的），并在覆盖前留一份 `<path>.bak` |
-| **`parseMcpRows` 只读每条 insert 块的第一行** | 写文件时会把「解析出来的行 + 新行」重新输出，所以**加第二个服务器时，之前加过的其它服务器会被静默删掉**；`mcp/list` 也只显示一个 | 按行标记切分，逐行解析（`- id: mcp-<name>` 到下一行为止），并用 `--lint` 式的不变量测试锁住 |
-| **`advanceTask` 会把下次时间设成「现在」** | 由于到期判定是 `nextAt <= now`，而 UI 创建的任务只写 `nextAt`、没有 `firstAt`，`advanceTask` 会回退到 `now` → **任务第一次跑完后每 30 秒再跑一次**（每次 spawn 一个子会话，烧额度）；另外正好落在整周期边界时也会立刻重跑 | 排期锚点改为 `firstAt`（有则用）否则上一次的 `nextAt`；跳转用 `floor(elapsed/freq)+1` 保证**严格晚于 now**；手动 run-now 也不再打乱原计划 |
+- 它们属于 harness 的能力，不属于「界面增强」；dsh 自身提供 MCP 客户端运行时（`dsh-mcp-client`）与 profile patch 层机制，MCP 服务器可以直接写进 `~/.dsh/profiles/web/cordis.patch.yml`（dsh 会热应用）。
+- 0.1.5 的 `ctx.fs` 实施 workspace-write 沙箱，profile 下的文件写入被拒，这两个面板的保存路径在实现上先天不可靠。
+- 移除前的实现、体检结论与回归测试都保留在 git 历史里：`git show 845f415:lib/index.js`、`git log --oneline -- lib/index.js`。
 
-**验证方式**（都不需要启动 dsh、不碰 `$DSH_HOME`，CI 也跑）：
-
-```bash
-node tools/mcp-merge-test.mjs        # MCP 合并：用户内容保留 / 三行全解析 / 只输出一个受管块 / 移除干净
-node tools/profile-store-test.mjs    # 写入建父目录 + .bak 备份 / 任务存储容错往返 / 排期严格向后
-python3 tools/css-diff.py --lint --check   # 注入样式无重复属性步等可疑模式
-```
-
-两个 harness 都是「从构建产物里抽出纯函数 + 在临时目录里跑」，并且**对旧版本代码会失败**（`mcp-merge-test` 在 `ca20552` 上 FAIL 2 条，`profile-store-test` 在修复前 FAIL 6 条），所以能当回归测试用。
-
-**已知限制**：host 半边**没有热重载**（只有 client bundle 有），以上修复需要重启一次 `dsh web` 才生效；重启会换 token，浏览器标签页需要重新打开日志里打印的 `?token=…` URL。
-
-**尚未验证**：真实 spawn 一次定时任务（会新建会话 + 花一次模型调用）、标题 provider 的时间戳后缀、以及面板类插件存在时的让位表现。
+移除后的自检对照：侧栏底部不再出现「MCP / 自动化」（只剩 dsh 自带的「设置」与第三方插件的「电源」）；`/enhancer/enhancer-api` 路由不再注册；插件 host 半边只保留 `/polish`、`/suggest`、`/prompt-library` 路由、适配器 `prepareCall` 补丁与标题 provider。
 
 ---
 
@@ -209,7 +184,7 @@ grep "patched prepareCall" ~/.dsh/web.log   # 或 dsh 日志文件
 curl -s -X POST http://127.0.0.1:3080/polish -H "content-type: application/json" -d '{"text":"测试"}'
 # 期望: no model route configured: open a session and pick a model first
 
-# 3. 浏览器：composer 工具栏应出现 提示词库 / 润色 按钮，侧边栏出现 MCP / 自动化 入口
+# 3. 浏览器：composer 工具栏应出现 提示词库 / 润色 按钮，消息右侧出现时间与工具耗时
 ```
 
 ---
@@ -259,5 +234,3 @@ cp -f lib/client.js ~/.dsh/profiles/web/node_modules/dsh-enhance-tool/lib/client
 ## 数据文件（勿提交 / 勿外发）
 
 - `~/.dsh/prompts.json` — 提示词库（可能含环境敏感信息）
-- `~/.dsh/profiles/web/enhancer-tasks.json` — 自动化任务
-- `~/.dsh/profiles/web/cordis.patch.yml` — MCP 合并写入目标
