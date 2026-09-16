@@ -148,7 +148,8 @@ fuser -k 3080/tcp && nohup dsh web &   # 重启 dsh web
 
 | 症状 | 原因（实测证据） | 修法 |
 |---|---|---|
-| 侧边栏 logo / 新建会话文字不随字号缩放 | `[class$=_brand]`、`[class$=_newSessionLabel]` 命中 0，产品现在在类名后还挂 `hHd-Xa_wide` 等（`[class*=]` 命中） | 改为 `[class*=_brand]` / `[class*=_newSessionLabel]`（实测 182px / 200px 生效） |
+| 侧边栏「新建会话」文字宽度不随字号缩放 | `[class$=_newSessionLabel]` 命中 0，产品现在在类名后还挂 `hHd-Xa_wide` 等（`[class*=]` 命中） | 改为 `[class*=_newSessionLabel]`（实测 max-width 200px → 286px 随 scale 生效） |
+| 侧边栏品牌 lockup（鲸鱼 + deepseek HARNESS）随字号缩放 | 0.1.5 把它拆成**两个 svg**（mark 24×18 + wordmark 156×24）挂在 `[class*=_brandIdentity]` 下；旧规则「给 `_brand` 下的 svg 定死 182×24」一旦改成 `[class*=]` 就会把 wordmark 压成 26px（文字变小），用 zoom 放大又会被侧栏宽度裁切 | **撤销**品牌缩放：产品自己拥有该 lockup 的尺寸（老版本的单 svg lockup 规则仍按后缀匹配保留）。其余侧栏元素（新建会话、设置触发器、图标按钮、工作区列表）仍随 `工作区字号` 缩放 |
 | 面包屑宽度限制失效 | `[class$=_crumb]` 命中 0 / `[class*=]` 命中 3 | `button[class*=_crumb]` |
 | 设置滑块自定义外观失效 | 滑块类名已变为**无哈希**的 `uitw-slider` | `input[type=range][class*=uitw-slider]`（实测 `appearance:none`、`height:4px`） |
 | hero 菜单限高修复完全不执行 | 锚点 `…composer.bar textarea` 在 0.1.5 已不存在（输入框是 Lexical `contenteditable`） | 锚点回退链 `textarea → [data-composer-input] → [data-composer-card]`（实测效果已执行；0.1.5 菜单自带≈视口高度的 max-height，按原设计会主动让位——强行限高只会让菜单变矮却仍压住输入框，故保留让位语义） |
