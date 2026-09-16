@@ -79,12 +79,17 @@ fuser -k 3080/tcp && nohup dsh web &   # 重启 dsh web
 - 自定义标题 provider（所有消息触发）+ **创建时间戳后缀**（`-YYYYMMDDHHmmss`）
 - 自动禁用官方 `session-title-llm`（通过 bundle.patch）
 
-### 4. 注入控件沿用 dsh 默认样式（不自带按钮皮肤）
+### 4. 注入控件与面板沿用 dsh 默认样式（不自带皮肤/容器外观）
 
-- **按钮不再单独设计外观**：composer 工具栏里的「提示词库 / 润色」按钮、建议条上的候选按钮，都会在挂载后**读取相邻的产品控件类名并复制到自己身上**（`adoptProductButtonStyle`）——工具按钮取同排的 `指令 / 添加附件`，建议条取 composer 里的文字 pill（如「完全权限」）。所以外观与 dsh 自己的控件逐像素一致，且产品改样式时自动跟随；类名是**从活的 DOM 读的、不写死哈希**。
-- 插件自己的按钮规则全部用 `:where()` 包裹（**零优先级**），只作为「没找到可借鉴控件」时的回退，值也直接用产品 token（`--dsw-specific-selector` / `label-primary` / `interactive-bg-hover-solid`），所以一旦采纳到产品类名，产品声明必然胜出。
-- 面板本身（提示词库弹层、润色小面板、管理对话框）仍是插件自己的容器（产品没有对等组件可借），只沿用 `--dsw-alias-*` / `--dsw-font-*` token。
+**按钮**
+- composer 工具栏的「提示词库 / 润色」按钮、建议条候选按钮，挂载后**从活的 DOM 读取相邻产品控件的类名并复制到自己身上**（`adoptProductButtonStyle`）：工具按钮取同排的 `指令 / 添加附件`，建议条取 composer 里的文字 pill（如「完全权限」）。外观与产品逐像素一致，产品改样式自动跟随，类名是**从 DOM 读的、不写死哈希**。
 
+**面板（弹层 / 对话框）**
+- 产品自己的弹层/对话框只在打开时存在，所以用一个**被动学习的登记表**（`rememberProductStyles`，rAF 节流的 MutationObserver）：一旦屏幕上出现过 `[role=menu]` / `[role=menuitem]` / `[role=dialog]` / 对话框里的导航行，就把它们的类名记下来。提示词库弹层、润色小面板借**产品的 menu**（`background:--dsw-specific-menu`、20px 圆角、`--dsw-elevation-prominent` 阴影、4px 内边距），管理对话框借**产品的设置面板**（32px 圆角 + 同款阴影），列表行借 menu cell / 对话框 navCell（40px、10/12px 圆角、hover 用 `--dsw-alias-interactive-bg-hover`）。
+- 学习失败时（用户还没打开过任何产品弹层、或产品改了类名）由 `:where()` 包裹的**零优先级回退**兜底，取值全部照抄产品规则体（含 token）——实测回退与产品数值完全一致，所以不存在“没学到就难看”的窗口。
+- 我们自己的行因为要放两行内容（标题 + 摘要），用**双类名**（`.PmptLb_item.PmptLb_item`）提高优先级来放宽产品行的固定高度、并 `flex:0 0 auto` 防止被列表压缩；选中态同理（`.PmptLb_manageRowActive.PmptLb_manageRowActive`）以免被借来的类名盖掉。
+
+### 5. UI 修复
 ### 5. UI 修复
 
 - **hero 菜单 overlay 修复**：下拉菜单覆盖输入框时自动限高滚动（不影响模型选择等短菜单）
