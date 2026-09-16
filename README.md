@@ -130,6 +130,41 @@ fuser -k 3080/tcp && nohup dsh web &   # 重启 dsh web
 
 ---
 
+## 0.1.5 API 漂移体检（2026-09 实测）
+
+插件大量依赖产品内部结构。以 `dsh 0.1.5-rc.2` 为基准，对每一处依赖都做了“选择器/服务是否还命中”的实测，结论如下。
+
+**有效（无需改动）**
+
+| 类别 | 命中项 |
+|---|---|
+| slot | `conversation.input.left` / `conversation.input.dock` / `settings.general.item` / `shell.overlay` / `sidebar.footer.action` 全部照常挂载；hero 三个 slot 也存在 |
+| 布局类名 | `wSkVaW_root` / `_scrollBody` / `_composerSeat` / `_titleCluster`（标签页搬运生效）、hero 的 `wSkVaW_composerHero` / `pXSMma_root` / `div[data-phase=hero]` |
+| 后缀类名 | `_add` `_bubble` `_composerSeat` `_crumbCurrent` `_iconButton` `_logoRow` `_newSession` `_primary` `_sectionHeader` `_tabs` `_time` `_title` `_titleRow` `_trigger` `_viewArea` |
+| 产品属性 | `[role=menu]`、`[data-chat-call-id]`、`[data-disclosure-row]`、`[data-composer-input]`、`[data-composer-card]`、`[data-conversation-scroll]`、`[data-input-scroll]`、各 `[data-slot=…]` |
+| host 侧 | `ctx.webServer/fs/jobs/agents/subagents/sessionTitle/llm/sessions` 及所用方法均在；`/enhancer/enhancer-api`（mcp/list、jobs/list、tasks/list）、`/polish`、`/suggest`、`/prompt-library` 均 200 |
+
+**本次修好的漂移**
+
+| 症状 | 原因（实测证据） | 修法 |
+|---|---|---|
+| 侧边栏 logo / 新建会话文字不随字号缩放 | `[class$=_brand]`、`[class$=_newSessionLabel]` 命中 0，产品现在在类名后还挂 `hHd-Xa_wide` 等（`[class*=]` 命中） | 改为 `[class*=_brand]` / `[class*=_newSessionLabel]`（实测 182px / 200px 生效） |
+| 面包屑宽度限制失效 | `[class$=_crumb]` 命中 0 / `[class*=]` 命中 3 | `button[class*=_crumb]` |
+| 设置滑块自定义外观失效 | 滑块类名已变为**无哈希**的 `uitw-slider` | `input[type=range][class*=uitw-slider]`（实测 `appearance:none`、`height:4px`） |
+| hero 菜单限高修复完全不执行 | 锚点 `…composer.bar textarea` 在 0.1.5 已不存在（输入框是 Lexical `contenteditable`） | 锚点回退链 `textarea → [data-composer-input] → [data-composer-card]`（实测效果已执行；0.1.5 菜单自带≈视口高度的 max-height，按原设计会主动让位——强行限高只会让菜单变矮却仍压住输入框，故保留让位语义） |
+
+**已失效但无害（保留作兼容/其他插件用）**
+
+| 死代码 | 说明 |
+|---|---|
+| `.nArs4W_panel` / `.nArs4W_bottomPanel`（JS + CSS） | 右侧面板让位与 hero 底部留白：这两个类在产品与已装插件里都不存在，产品自己处理间距；相关 `margin-right:0` 覆盖仍在（用于关掉旧版面板让位偏移） |
+| `.W-zNGW_*` / `.dsx-stats-*` / `--dsx-rail-w` | 属于“统计/工作台侧栏”类插件，当前未安装 |
+| `[class$=_toggleButton]` `_toggleCluster` `_badge` `_badgeCount` | 电源按钮/统计插件的内部类名（`sidebar.footer.action` slot 本身正常） |
+| `[class$=_versionPicker]` `_heading` `_intro` `_head` `_sub` `dsh_notification_*` | 设置页内部类名，0.1.5 渲染结构不同；只影响分隔线/下拉皮肤等外观 |
+| `textarea.uV2eYG_input` 回退、`fillSectionTitle` | 老版本回退路径；`fillSectionTitle` 逻辑仍正确，只是 0.1.5 设置页很少出现“有 intro 段但无标题”的情况，通常静默 |
+
+---
+
 ## 安装后自检
 
 ```bash
