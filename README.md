@@ -79,7 +79,13 @@ fuser -k 3080/tcp && nohup dsh web &   # 重启 dsh web
 - 自定义标题 provider（所有消息触发）+ **创建时间戳后缀**（`-YYYYMMDDHHmmss`）
 - 自动禁用官方 `session-title-llm`（通过 bundle.patch）
 
-### 4. UI 修复
+### 4. 注入控件沿用 dsh 默认样式（不自带按钮皮肤）
+
+- **按钮不再单独设计外观**：composer 工具栏里的「提示词库 / 润色」按钮、建议条上的候选按钮，都会在挂载后**读取相邻的产品控件类名并复制到自己身上**（`adoptProductButtonStyle`）——工具按钮取同排的 `指令 / 添加附件`，建议条取 composer 里的文字 pill（如「完全权限」）。所以外观与 dsh 自己的控件逐像素一致，且产品改样式时自动跟随；类名是**从活的 DOM 读的、不写死哈希**。
+- 插件自己的按钮规则全部用 `:where()` 包裹（**零优先级**），只作为「没找到可借鉴控件」时的回退，值也直接用产品 token（`--dsw-specific-selector` / `label-primary` / `interactive-bg-hover-solid`），所以一旦采纳到产品类名，产品声明必然胜出。
+- 面板本身（提示词库弹层、润色小面板、管理对话框）仍是插件自己的容器（产品没有对等组件可借），只沿用 `--dsw-alias-*` / `--dsw-font-*` token。
+
+### 5. UI 修复
 
 - **hero 菜单 overlay 修复**：下拉菜单覆盖输入框时自动限高滚动（不影响模型选择等短菜单）
 
