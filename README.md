@@ -109,6 +109,10 @@ fuser -k 3080/tcp && nohup dsh web &   # 重启 dsh web
 ### 其他已知问题
 
 - **dsh 0.1.1-rc.2 的 modlens 适配器缺少 `prepareCall`**：插件启动时自动为缺失的适配器补丁（包装 `stream` 实现），使 `/polish`、`/suggest`、标题生成直接使用**用户会话选择的模型**；若补丁不可用则自动 fallback 到内置 `deepseek-official`。
+- **dsh 0.1.5 输入框改成 Lexical contenteditable（页面里已无 `<textarea>`）**：composer 不再有 `textarea`，因此「润色」与「提示词库插入」原先读 `composerTextarea().value` 会拿到空串（潦色直接不动、库插入丢失已有草稿）。现改为从 slot 的 `useInput((state) => state.draft)` 读草稿、用 `inputActions.setDraft(text)` 写回——这是能到达 Lexical 内部状态的唯一写入口；DOM textarea 仅作老版本回退（`composerDraft` / `setComposerDraft` / `focusComposer` 三个小助手）。
+- **dsh 0.1.5 的 dock slot `session` 只带生命周期字段（无 `nodes`）**：预测回复原先用 `session.nodes` 找最后一条 AI 回复，所以 `lastText` 恒为空、整个建议条不渲染（表现为“功能消失”）。现改为从 Session 事件窗口取最后一条 `assistant/message` 的 text 块（`suggestTextFeed` 共享馈送），`session.nodes` 路径仅作回退。
+- **建议条点击行为读错了 localStorage key**：`useDraft` 读的是旧版 `harness-ui-enhancer.state`（迁移时已经被删掉），所以“仅填入”设置被忽略、永远直接发送。现改读 `dsh-enhance-tool.state`（旧 key 作为回退）。
+- **dsh 0.1.5 的 `conversation.input.left` props 用 `sessionId` 而不是 `session`**：润色与库内润色现在优先传 `sessionId`，让 `/polish` 用会话自己的模型路由，`session?.sessionId` 仅作回退。
 - **dsh 0.1.2 起 web 端需要认证**：直接访问 `http://127.0.0.1:3080/` 会返回 401，请使用启动日志中打印的 `http://127.0.0.1:3080/?token=...`（换取 cookie 后即可正常访问）。
 - **dsh 0.1.2 的用户气泡结构变化**：文本由块级 `div` 改为内联 `span`，折叠逻辑改为裁剪气泡本体（高度 = 5 行 + 气泡内边距），展开按钮挂在气泡外的 `userStack` 上以免被 `overflow:hidden` 裁掉。
 - **消息工具条常显（29-msgmeta）**：不新增 DOM，直接复用产品自身的消息工具条（`*_actions` 行：时钟 `*_timeStart` / `*_timeEnd`、复制 / 分叉、用量 / 耗时），时间随产品本地化格式（当天 `HH:mm`，跨天 `M月D日 HH:mm`）。产品在 `@media (hover:hover)` 下把整行设为 `opacity:0`（仅 hover / 最近一条时才显示），本插件做两层保证：
