@@ -3,7 +3,7 @@
 DeepSeek Harness (`dsh`) web 界面增强插件 — 润色、提示词库、预测回复、宽度/字号设置、MCP 与定时自动化面板。
 
 - **安装形态**：100% 插件注入（slot / shell.overlay / settings / sessionTitle 官方机制），**零 bundle 补丁**
-- **兼容版本**：`dsh >= 0.1.0-rc.7`（已实测 `0.1.1-rc.2`、`0.1.2-rc.1`）
+- **兼容版本**：`dsh >= 0.1.0-rc.7`（已实测 `0.1.1-rc.2`、`0.1.2-rc.1`、`0.1.5-rc.2`）
 - **许可证**：MIT
 
 ---
@@ -69,6 +69,7 @@ fuser -k 3080/tcp && nohup dsh web &   # 重启 dsh web
 | **AI 消息占满消息列** | 无背景卡片、`width:100%` 消除右侧空白 |
 | **用户消息自适应宽度** | `fit-content + max-width:100%`：内容少小气泡、内容多撑满整列 |
 | **用户长消息折叠** | 渲染行 > 5 行自动折叠，点击展开/收起（含历史消息） |
+| **消息工具条常显** | 每条消息常显发送时间与复制 / 分叉 / 调用量 / 耗时按钮（当天 `HH:mm`，跨天带日期）——产品默认需悬浮才显示 | 设置 → 通用 → 消息工具条常显 |
 | **面板打开时消息区让位** | 工作台面板 / 侧边栏打开时消息列自适应，不重叠不压缩 |
 | **hero 页面适配** | hero composer 固定底部、headline 置顶 |
 
@@ -100,7 +101,7 @@ fuser -k 3080/tcp && nohup dsh web &   # 重启 dsh web
 
 本插件的 **布局增强**（AI 消息无背景、用户气泡自适应、长消息折叠、面板让位、宽度设置）通过运行时 CSS 注入实现。用户消息相关选择器已改为**哈希无关**的后缀匹配（`[class*=_userStack]` / `[class*=_bubble]` / `[class*=_userRow]`），因此不受 dsh 0.1.2 把用户气泡从 `dsh-client-ui-conversation` 迁到 `dsh-client-ui-chat`（哈希前缀 `gdEzaW_*` → `Sixlwa_*`）的影响；其余布局选择器仍依赖 dsh 客户端 bundle 的 **CSS-in-JS 哈希类名**（如 `wSkVaW_*` / `pXSMma_*` / `VOzbGW_*` / `nArs4W_*`）。这些类名随 dsh 每次构建可能变化。
 
-- **实测版本**：`0.1.0-rc.7`、`0.1.1-rc.2`、`0.1.2-rc.1`
+- **实测版本**：`0.1.0-rc.7`、`0.1.1-rc.2`、`0.1.2-rc.1`、`0.1.5-rc.2`
 - **布局增强失效表现**：安装后 AI/用户消息样式无变化（无错误提示，功能静默不生效）
 - **处理方式**：布局失效时，其余功能（润色 / 提示词库 / 建议条 / MCP / 自动化 / 标题）不受影响；请提交 issue 附上你的 dsh 版本与 `document.querySelector('*[class]').className` 中对应的消息区类名前缀，我们会更新注入选择器。
 
@@ -109,6 +110,10 @@ fuser -k 3080/tcp && nohup dsh web &   # 重启 dsh web
 - **dsh 0.1.1-rc.2 的 modlens 适配器缺少 `prepareCall`**：插件启动时自动为缺失的适配器补丁（包装 `stream` 实现），使 `/polish`、`/suggest`、标题生成直接使用**用户会话选择的模型**；若补丁不可用则自动 fallback 到内置 `deepseek-official`。
 - **dsh 0.1.2 起 web 端需要认证**：直接访问 `http://127.0.0.1:3080/` 会返回 401，请使用启动日志中打印的 `http://127.0.0.1:3080/?token=...`（换取 cookie 后即可正常访问）。
 - **dsh 0.1.2 的用户气泡结构变化**：文本由块级 `div` 改为内联 `span`，折叠逻辑改为裁剪气泡本体（高度 = 5 行 + 气泡内边距），展开按钮挂在气泡外的 `userStack` 上以免被 `overflow:hidden` 裁掉。
+- **消息工具条常显（29-msgmeta）**：不新增 DOM，直接复用产品自身的消息工具条（`*_actions` 行：时钟 `*_timeStart` / `*_timeEnd`、复制 / 分叉、用量 / 耗时），时间随产品本地化格式（当天 `HH:mm`，跨天 `M月D日 HH:mm`）。产品在 `@media (hover:hover)` 下把整行设为 `opacity:0`（仅 hover / 最近一条时才显示），本插件做两层保证：
+  1. CSS：`body.enhc-msgmeta [class*=_actions]:has(>…_timeStart/_timeEnd){opacity:1!important}` 强制该行可见；写成**两条独立的 `:has()` 选择器**（不用 `:is(:has())` 嵌套，部分引擎对嵌套支持不完整），也不依赖任何哈希类名前缀。
+  2. JS 传保险：一个 rAF 节流的 MutationObserver 给时钟行加内联 `opacity:1!important`——内联 `!important` 胜过任何样式表规则，即使产品改了 hover 规则、其它插件注入更强的 `opacity:0!important`、或浏览器 `:has()` 异常，工具条也不会再被 hover 挡住（已用“注入 `opacity:0!important` 敌意规则”的方式实测）。关闭开关或插件卸载时会移除内联样式。
+  产品本身的隐藏规则只作用在整行上（单个按钮没有 opacity 规则），所以强制该行可见就能同时露出时间与全部按钮。若某个 dsh 版本没有渲染该工具条，此开关静默无效果。
 - **会话标题 provider** 需要 `@deepseek-ai/dsh-session-title-llm`（install.sh 自动链接）。
 
 ---
@@ -145,6 +150,16 @@ curl -s -X POST http://127.0.0.1:3080/polish -H "content-type: application/json"
 ```
 
 `client.js` 是对 dsh 官方 client bundle 的**注入产物**（通过 slot 注入 + 运行时 CSS，不修改 bundle 源文件）。重注入脚本与本地开发流程见内部 `dsh-patches/`（未随仓库发布）。
+
+### 本地开发闭环（只改 client.js 时无需重启 dsh web）
+
+profile 里的 `dsh-enhance-tool/lib/client.js` 与仓库文件是**两份拷贝**（不是符号链接），因此改完仓库文件要覆盖过去：
+
+```bash
+cp -f lib/client.js ~/.dsh/profiles/web/node_modules/dsh-enhance-tool/lib/client.js
+```
+
+`@deepseek-ai/dsh-client-hmr` 会以 500ms 轮询 profile 里的 client bundle，检测到变化后重新计算该插件的 bundle rev（`index.html` 中 `dsh-enhance-tool/client.js&rev=...` 会变）并通知浏览器热重载 —— **不需要重启 dsh web**。实测：已打开的标签页会在几秒内自动热替换插件（SSE `rebuilt` 帧 → 重载模块 + 重建样式标签），无需刷新；但标签页被浏览器冻结/SSE 断连时会错过该帧，此时 Ctrl+Shift+R 硬刷新即可。注意 `index.html` 里合并大 bundle 的那个 `rev=` 不会变，别用它判断是否生效；host 侧 `lib/index.js` 的改动仍然要重启 dsh web。
 
 ---
 
