@@ -173,6 +173,32 @@ fuser -k 3080/tcp && nohup dsh web &   # 重启 dsh web
 
 ---
 
+## 0.1.5 host 侧行为体检（2026-09 实测）
+
+client 侧靠选择器命中就能验证，host 侧（`lib/index.js`：路由 / 定时任务 / MCP 写入 / 标题 provider）只能靠**真的调接口 + 离线不变量测试**。这一轮发现 3 个真问题：
+
+| 问题 | 症状（实测） | 修法 |
+|---|---|---|
+| **profile 文件写入被 fs 沙箱拒绝** | `mcp/apply` 与 `tasks/create` 全部返回 `cannot write "~/.dsh/profiles/web/…": file access denied under workspace-write mode`；两个面板看起来正常但**存不进去**（读取正常，所以列表是空的但没报错） | 这两个文件在 `$DSH_HOME/profiles/web` 下、位于所有 workspace 之外，而 0.1.5 的 `ctx.fs` 实施 workspace-write 沙箱。改为用 `node:fs`（核心包 `dsh-session-persistence-jsonl` 写会话日志也是这么做的），并在覆盖前留一份 `<path>.bak` |
+| **`parseMcpRows` 只读每条 insert 块的第一行** | 写文件时会把「解析出来的行 + 新行」重新输出，所以**加第二个服务器时，之前加过的其它服务器会被静默删掉**；`mcp/list` 也只显示一个 | 按行标记切分，逐行解析（`- id: mcp-<name>` 到下一行为止），并用 `--lint` 式的不变量测试锁住 |
+| **`advanceTask` 会把下次时间设成「现在」** | 由于到期判定是 `nextAt <= now`，而 UI 创建的任务只写 `nextAt`、没有 `firstAt`，`advanceTask` 会回退到 `now` → **任务第一次跑完后每 30 秒再跑一次**（每次 spawn 一个子会话，烧额度）；另外正好落在整周期边界时也会立刻重跑 | 排期锚点改为 `firstAt`（有则用）否则上一次的 `nextAt`；跳转用 `floor(elapsed/freq)+1` 保证**严格晚于 now**；手动 run-now 也不再打乱原计划 |
+
+**验证方式**（都不需要启动 dsh、不碰 `$DSH_HOME`，CI 也跑）：
+
+```bash
+node tools/mcp-merge-test.mjs        # MCP 合并：用户内容保留 / 三行全解析 / 只输出一个受管块 / 移除干净
+node tools/profile-store-test.mjs    # 写入建父目录 + .bak 备份 / 任务存储容错往返 / 排期严格向后
+python3 tools/css-diff.py --lint --check   # 注入样式无重复属性步等可疑模式
+```
+
+两个 harness 都是「从构建产物里抽出纯函数 + 在临时目录里跑」，并且**对旧版本代码会失败**（`mcp-merge-test` 在 `ca20552` 上 FAIL 2 条，`profile-store-test` 在修复前 FAIL 6 条），所以能当回归测试用。
+
+**已知限制**：host 半边**没有热重载**（只有 client bundle 有），以上修复需要重启一次 `dsh web` 才生效；重启会换 token，浏览器标签页需要重新打开日志里打印的 `?token=…` URL。
+
+**尚未验证**：真实 spawn 一次定时任务（会新建会话 + 花一次模型调用）、标题 provider 的时间戳后缀、以及面板类插件存在时的让位表现。
+
+---
+
 ## 安装后自检
 
 ```bash

@@ -22,3 +22,7 @@ jobs:
         run: bash -n install.sh
       - name: Verify injected stylesheet parses cleanly
         run: python3 tools/css-diff.py --lint --check
+      - name: Verify host-side store + merge invariants
+        run: |
+          node tools/mcp-merge-test.mjs
+          node tools/profile-store-test.mjs
