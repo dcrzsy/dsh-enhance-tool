@@ -153,15 +153,22 @@ fuser -k 3080/tcp && nohup dsh web &   # 重启 dsh web
 | 设置滑块自定义外观失效 | 滑块类名已变为**无哈希**的 `uitw-slider` | `input[type=range][class*=uitw-slider]`（实测 `appearance:none`、`height:4px`） |
 | hero 菜单限高修复完全不执行 | 锚点 `…composer.bar textarea` 在 0.1.5 已不存在（输入框是 Lexical `contenteditable`） | 锚点回退链 `textarea → [data-composer-input] → [data-composer-card]`（实测效果已执行；0.1.5 菜单自带≈视口高度的 max-height，按原设计会主动让位——强行限高只会让菜单变矮却仍压住输入框，故保留让位语义） |
 
-**已失效但无害（保留作兼容/其他插件用）**
+**已删除的死代码（2026-09 清理）**
 
-| 死代码 | 说明 |
+以下样式与逻辑都做了“命中数 0 + 产品与所有已装插件里都不存在该类名/变量”的双重确认后删除，删完复测功能与布局无变化：
+
+| 删除项 | 依据 |
 |---|---|
-| `.nArs4W_panel` / `.nArs4W_bottomPanel`（JS + CSS） | 右侧面板让位与 hero 底部留白：这两个类在产品与已装插件里都不存在，产品自己处理间距；相关 `margin-right:0` 覆盖仍在（用于关掉旧版面板让位偏移） |
-| `.W-zNGW_*` / `.dsx-stats-*` / `--dsx-rail-w` | 属于“统计/工作台侧栏”类插件，当前未安装 |
-| `[class$=_toggleButton]` `_toggleCluster` `_badge` `_badgeCount` | 电源按钮/统计插件的内部类名（`sidebar.footer.action` slot 本身正常） |
-| `[class$=_versionPicker]` `_heading` `_intro` `_head` `_sub` `dsh_notification_*` | 设置页内部类名，0.1.5 渲染结构不同；只影响分隔线/下拉皮肤等外观 |
-| `textarea.uV2eYG_input` 回退、`fillSectionTitle` | 老版本回退路径；`fillSectionTitle` 逻辑仍正确，只是 0.1.5 设置页很少出现“有 intro 段但无标题”的情况，通常静默 |
+| `.nArs4W_panel` / `.nArs4W_bottomPanel` 相关的 JS 效应（`alignPanel`、`syncBottomPanel`）与 `--dsh-bottom-panel-height` 两条 CSS | 类名与变量在产品内全库搜索为 0（仅插件自己引用）；面板让位/底部留白由产品自身处理 |
+| `.W-zNGW_*`、`.dsx-stats-*`、`--dsx-rail-w` 及相关 `syncToggleStates` 效应 | 属于“统计/工作台侧栏”类插件，未安装且产品无此类名 |
+| `[class$=_toggleButton]` `_toggleCluster` `[class$=_badge]` `_badgeCount` | 电源按钮/统计插件内部类名，当前 UI 命中 0 |
+| `[class$=_versionPicker] select*`（4 条） | 设置页已无 `_versionPicker` 也无任何 `<select>`（命中 0） |
+| `.dsh_notification_title/subtitle/heading` 皮肤 | 插件市场/设置页命中 0 |
+| `html #root{margin-right:0}`、`…>div:nth-child(2){margin-bottom:0}`、`_viewArea`/`_composerSeat` 的 `margin-right:0` 覆盖 | 实测“启用 vs 禁用插件样式表”四项计算值完全相同（都是 0px），即全是空操作 |
+
+清理后插件样式表规则数 **156 → 127**，`lib/client.js` 约 -6.3 KB。
+
+保留（仍有用，不算死代码）：`textarea` 老版本回退路径、`fillSectionTitle`（0.1.5 的 Agent 预设页仍有 `p[class$=_intro]`，逻辑可命中）、`.enhc-*` 自身类名。
 
 ---
 
