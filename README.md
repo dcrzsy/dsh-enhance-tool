@@ -70,6 +70,7 @@ fuser -k 3080/tcp && nohup dsh web &   # 重启 dsh web
 | **用户消息自适应宽度** | `fit-content + max-width:100%`：内容少小气泡、内容多撑满整列 |
 | **用户长消息折叠** | 渲染行 > 5 行自动折叠，点击展开/收起（含历史消息） |
 | **消息工具条常显** | 每条消息常显发送时间与复制 / 分叉 / 调用量 / 耗时按钮（当天 `HH:mm`，跨天带日期）——产品默认需悬浮才显示 | 设置 → 通用 → 消息工具条常显 |
+| **工具调用耗时** | 每条工具调用与子工具（PTC 子调用）右侧常显耗时（`296ms` / `2分02秒`）；**进行中的调用实时计时**（蓝色脉动，如 `35s…`），完成后自动定型；悬浮显示开始 / 结束时刻 | 设置 → 通用 → 工具调用耗时 |
 | **面板打开时消息区让位** | 工作台面板 / 侧边栏打开时消息列自适应，不重叠不压缩 |
 | **hero 页面适配** | hero composer 固定底部、headline 置顶 |
 
@@ -114,6 +115,13 @@ fuser -k 3080/tcp && nohup dsh web &   # 重启 dsh web
   1. CSS：`body.enhc-msgmeta [class*=_actions]:has(>…_timeStart/_timeEnd){opacity:1!important}` 强制该行可见；写成**两条独立的 `:has()` 选择器**（不用 `:is(:has())` 嵌套，部分引擎对嵌套支持不完整），也不依赖任何哈希类名前缀。
   2. JS 传保险：一个 rAF 节流的 MutationObserver 给时钟行加内联 `opacity:1!important`——内联 `!important` 胜过任何样式表规则，即使产品改了 hover 规则、其它插件注入更强的 `opacity:0!important`、或浏览器 `:has()` 异常，工具条也不会再被 hover 挡住（已用“注入 `opacity:0!important` 敌意规则”的方式实测）。关闭开关或插件卸载时会移除内联样式。
   产品本身的隐藏规则只作用在整行上（单个按钮没有 opacity 规则），所以强制该行可见就能同时露出时间与全部按钮。若某个 dsh 版本没有渲染该工具条，此开关静默无效果。
+- **工具调用耗时（30-calldur）**：数据来自 **Session 事件窗口**，不靠观察计时：
+  - 根调用：`tool/call`（`data.callId`）→ 开始，`tool/result`（`data.message.source.callId`）→ 结束。
+  - 子工具（PTC 子调用）：`tool/ptc-dispatch-start`（`data.subCallId`）→ 开始，`tool/ptc-dispatch` → 结束。
+  - 事件窗口通过 `ctx.inject(["sessions"], …)` 取（`sessions.binding(id).eventSource`）——用 `ctx.inject` 而不是写进 `inject` 数组，**依赖缺失时插件照常加载、只是不显示耗时**；同时订阅 `sessions.list` 跟踪会话切换、订阅 `eventSource` 跟踪新事件。
+  - 行定位靠转录里的 `[data-chat-call-id]`（子调用就是 `<rootCallId>:ptc:<n>`，与事件里的 `subCallId` 完全一致）；只有开始没有结束 = 进行中 → 500ms 定时器实时刷新，结果事件落地后自动定型。
+  - 工具卡片有三种渲染形态（`[data-disclosure-row]` / `role=button[aria-expanded]` / 无 body 的 bash 行），host 元素按此顺序回退，最后一档用标题 / 摘要 span 的父元素，所以三种形态都能挂上耗时。
+  - DOM 扫描用 rAF 节流（与长消息折叠同一套思路）；开关关闭或插件卸载时删除 chip 并停掉定时器。窗口外的历史行（`hasMore` 截断）没有数据，不显示耗时。
 - **会话标题 provider** 需要 `@deepseek-ai/dsh-session-title-llm`（install.sh 自动链接）。
 
 ---
