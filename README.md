@@ -206,6 +206,18 @@ curl -s -X POST http://127.0.0.1:3080/polish -H "content-type: application/json"
 
 `client.js` 是对 dsh 官方 client bundle 的**注入产物**（通过 slot 注入 + 运行时 CSS，不修改 bundle 源文件）。重注入脚本与本地开发流程见内部 `dsh-patches/`（未随仓库发布）。
 
+### 改注入样式前先跑规则级 diff
+
+注入的样式表在 `lib/client.js` 里是**一整行 JS 字符串**，普通 `git diff` 看不出「从逗号列表里删掉一个选择器」这类改动——已因此踩过两次坑（`[data-slot=x] [class$=_meta],[data-slot=x] [class$=_time]` 删掉前半段后变成 `[data-slot=x] [data-slot=x] …`，永不命中；`[class$=_brand] svg` 放宽成 `[class*=_brand] svg` 把品牌 wordmark 压扁）。所以改完必须跑：
+
+```bash
+python3 tools/css-diff.py            # HEAD vs 工作区，按规则列出增删
+python3 tools/css-diff.py --lint --check   # 只扫可疑模式（重复属性步、空规则），CI 也跑这条
+python3 tools/css-diff.py 0f8acdb HEAD     # 任意两个版本对比
+```
+
+规则 diff 只说明「改了什么」，是否**该**这么改还得在浏览器里确认：把 `style[data-plugin-css="dsh-enhance-tool/enhancer.module.css"]` 的 `sheet.disabled` 在 `true/false` 之间切换，对比 `getComputedStyle` + `getBoundingClientRect`，并逐个列出被新命中的元素（放宽后缀→子串匹配时尤其重要）。
+
 ### 本地开发闭环（只改 client.js 时无需重启 dsh web）
 
 profile 里的 `dsh-enhance-tool/lib/client.js` 与仓库文件是**两份拷贝**（不是符号链接），因此改完仓库文件要覆盖过去：

@@ -20,3 +20,5 @@ jobs:
           node --check lib/client.js
       - name: Verify install.sh syntax
         run: bash -n install.sh
+      - name: Verify injected stylesheet parses cleanly
+        run: python3 tools/css-diff.py --lint --check
