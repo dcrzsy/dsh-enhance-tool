@@ -226,6 +226,15 @@ if (created !== null) {
 }
 
 // --- trash round trip + real-delete attempt + undo
+const archivedCount = () => page.evaluate(async () => {
+  try {
+    const res = await fetch('/plugins/dsh-archived-chats/state', { headers: { accept: 'application/json' } });
+    const body = await res.json();
+    return Array.isArray(body?.sessions) ? body.sessions.length : null;
+  } catch { return null; }
+});
+const archivedBefore = await archivedCount();
+
 const trashTarget = await firstCard();
 if (trashTarget !== null) {
   await dragCard(trashTarget, 5);
@@ -245,6 +254,8 @@ if (trashTarget !== null) {
     note: document.querySelector('.enhc-board-batch-text')?.textContent?.trim() ?? '',
   }));
   check('清空 empties the trash column', afterClear.trash === 0, afterClear.note);
+  const archivedAfter = await archivedCount();
+  check('a failed delete leaves nothing archived behind', archivedBefore === null || archivedAfter === null || archivedAfter <= archivedBefore, `${archivedBefore} -> ${archivedAfter}`);
   const undoLabel = await page.evaluate(() => [...document.querySelectorAll('.enhc-board-icon')].find((b) => /撤销归档/.test(b.textContent || ''))?.textContent?.trim() ?? null);
   if (undoLabel !== null) {
     await page.evaluate(() => [...document.querySelectorAll('.enhc-board-icon')].find((b) => /撤销归档/.test(b.textContent || ''))?.click());
@@ -252,7 +263,7 @@ if (trashTarget !== null) {
     const undoLeft = await page.evaluate(() => [...document.querySelectorAll('.enhc-board-icon')].filter((b) => /撤销归档/.test(b.textContent || '')).length);
     check('撤销归档 restores sessions archived by a failed delete', undoLeft === 0, undoLabel);
   } else {
-    check('撤销归档 restores sessions archived by a failed delete', true, 'nothing was archived (real delete worked)');
+    check('撤销归档 restores sessions archived by a failed delete', true, 'already auto-restored (or the delete worked)');
   }
   const leftovers = await page.evaluate(() => [...document.querySelectorAll('.enhc-board-icon')].filter((b) => /撤销归档/.test(b.textContent || '')).length);
   check('no archived leftovers after the probe', leftovers === 0, String(leftovers));
