@@ -170,6 +170,59 @@ if (dragTarget !== null) {
   check('reset to auto keeps the card on the board', backToAuto > 0);
 }
 
+// --- 待办 新建: free-form to-do cards (no session behind them)
+const addExists = await page.evaluate(() => !!document.querySelector('.enhc-board-add'));
+check('待办 offers a 新建待办 row', addExists);
+const itemCountBefore = await page.evaluate(() => document.querySelectorAll('[data-enhc-item]').length);
+await page.evaluate(() => document.querySelector('.enhc-board-add').click());
+await sleep(300);
+const PROBE_TITLE = 'probe 待办卡（会自动删除）';
+await page.keyboard.type(PROBE_TITLE, { delay: 8 });
+await page.keyboard.press('Enter');
+await sleep(500);
+const created = await page.evaluate(() => {
+  const card = [...document.querySelectorAll('[data-enhc-item]')].find((c) => c.innerText.includes('probe 待办卡'));
+  return card ? { id: card.getAttribute('data-enhc-card'), inTodo: !!document.querySelectorAll('.enhc-board-col')[0].querySelector(`[data-enhc-card="${card.getAttribute('data-enhc-card')}"]`), title: card.innerText.replace(/\n+/g, ' | ') } : null;
+});
+check('a new to-do card appears in 待办', created !== null && created.inTodo, created?.title ?? 'not found');
+check('the add row stays open for the next card', await page.evaluate(() => !!document.querySelector('.enhc-board-add-input')));
+await page.keyboard.press('Escape');
+await sleep(300);
+check('Escape leaves the add row', await page.evaluate(() => !document.querySelector('.enhc-board-add-input')));
+check('the header counts free-form cards', await page.evaluate(() => /条待办/.test(document.querySelector('.enhc-board-count')?.textContent ?? '')), true);
+
+if (created !== null) {
+  const itemId = created.id;
+  // rename in place (double click)
+  await page.evaluate((id) => document.querySelector(`[data-enhc-card="${id}"]`).dispatchEvent(new MouseEvent('dblclick', { bubbles: true })), itemId);
+  await sleep(300);
+  const editOpen = await page.evaluate((id) => !!document.querySelector(`[data-enhc-card="${id}"] input.enhc-board-item-input`), itemId);
+  check('double click opens an inline editor', editOpen);
+  await page.keyboard.down('Control');
+  await page.keyboard.press('KeyA');
+  await page.keyboard.up('Control');
+  await page.keyboard.type('probe 改名后的待办', { delay: 8 });
+  await page.keyboard.press('Enter');
+  await sleep(500);
+  check('the edited title is saved', await page.evaluate((id) => (document.querySelector(`[data-enhc-card="${id}"]`)?.innerText ?? '').includes('改名后的待办'), itemId));
+  // check it off -> 完成
+  await page.evaluate((id) => document.querySelector(`[data-enhc-card="${id}"] .enhc-board-item-check input`).click(), itemId);
+  await sleep(600);
+  check('checking a to-do card files it under 完成', await page.evaluate((id) => !!document.querySelectorAll('.enhc-board-col')[2].querySelector(`[data-enhc-card="${id}"]`), itemId));
+  // move it back and delete it
+  await page.evaluate((id) => document.querySelector(`[data-enhc-card="${id}"] .enhc-board-item-check input`).click(), itemId);
+  await sleep(500);
+  await clickCardButton(itemId, '⋯');
+  await sleep(300);
+  const itemMenu = await page.evaluate(() => [...document.querySelectorAll('.enhc-board-menu button')].map((b) => b.textContent.trim()));
+  check('a to-do card menu has columns plus 删除 (no 垃圾桶)', itemMenu.includes('删除') && !itemMenu.includes('垃圾桶'), itemMenu.join(' | '));
+  await page.evaluate(() => [...document.querySelectorAll('.enhc-board-menu button')].find((b) => b.textContent.trim() === '删除')?.click());
+  await sleep(600);
+  const gone = await page.evaluate((id) => !document.querySelector(`[data-enhc-card="${id}"]`), itemId);
+  check('deleting a to-do card removes it', gone);
+  check('the to-do card count is back to where it started', await page.evaluate((n) => document.querySelectorAll('[data-enhc-item]').length === n, itemCountBefore));
+}
+
 // --- trash round trip + real-delete attempt + undo
 const trashTarget = await firstCard();
 if (trashTarget !== null) {

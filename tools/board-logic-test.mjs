@@ -73,7 +73,7 @@ function grab(name) {
   return source.slice(fn, bodyClose + 1);
 }
 
-const CONSTS = ['BOARD_COLUMNS', 'BOARD_DAY_MS', 'BOARD_RECENT_DAYS', 'BOARD_PRUNE_DAYS'];
+const CONSTS = ['BOARD_COLUMNS', 'BOARD_DAY_MS', 'BOARD_RECENT_DAYS', 'BOARD_PRUNE_DAYS', 'BOARD_ITEM_TITLE_MAX'];
 const FUNCS = [
   'boardEmptyState',
   'boardParse',
@@ -88,6 +88,11 @@ const FUNCS = [
   'boardPrune',
   'boardView',
   'boardForget',
+  'boardIsItem',
+  'boardItemId',
+  'boardAddItem',
+  'boardUpdateItem',
+  'boardDeleteItem',
   'boardHide',
   'boardUnhide',
   'boardUndoAdd',
@@ -104,6 +109,7 @@ const {
   BOARD_COLUMNS,
   BOARD_DAY_MS,
   BOARD_RECENT_DAYS,
+  BOARD_ITEM_TITLE_MAX,
   boardEmptyState,
   boardParse,
   boardSerialize,
@@ -112,6 +118,11 @@ const {
   boardPrune,
   boardView,
   boardForget,
+  boardIsItem,
+  boardItemId,
+  boardAddItem,
+  boardUpdateItem,
+  boardDeleteItem,
   boardHide,
   boardUnhide,
   boardUndoAdd,
@@ -256,6 +267,41 @@ check('a restored session leaves the undo list', boardUndoDrop(undoState, ['u1']
 check('undo is idempotent', boardUndoAdd(undoState, ['u1']).undo, ['u1']);
 check('undo keeps ids of sessions that still exist', boardPrune(undoState, ['u1'], now).undo, ['u1']);
 check('undo drops ids of sessions that are gone and not hidden', boardPrune(boardUndoAdd(boardEmptyState(), ['u2']), [], now).undo, []);
+
+// 6d — free-form to-do cards (待办 新建), which have no session behind them
+const itemList = listOf([session('s1'), session('s2')]);
+let items = boardAddItem(boardEmptyState(), '  写周报  ');
+const itemId = Object.keys(items.items)[0];
+check('a new to-do card is stored with a trimmed title', items.items[itemId].title, '写周报');
+check('a new to-do card starts on top of 待办', ids(boardView(items, itemList, now, {}).columns.todo)[0], itemId);
+check('a new to-do card is manual', boardView(items, itemList, now, {}).columns.todo[0].manual, true);
+check('an empty title is ignored', Object.keys(boardAddItem(boardEmptyState(), '   ').items).length, 0);
+check('item ids never look like session ids', boardItemId().startsWith('todo-'), true);
+check('boardIsItem distinguishes cards from sessions', [boardIsItem(items, itemId), boardIsItem(items, 's1')], [true, false]);
+check('the payload keeps free-form cards', Object.keys(boardParse(boardSerialize(items)).items), [itemId]);
+check('the header reports free-form cards', boardView(items, itemList, now, {}).todoItems, 1);
+check('second card lands above the first', ids(boardView(boardAddItem(items, '第二条'), itemList, now, {}).columns.todo)[0] !== itemId, true);
+
+// editing + completing
+let edited = boardUpdateItem(items, itemId, { title: '写周报（已完成部分）' });
+check('a card title can be edited', edited.items[itemId].title, '写周报（已完成部分）');
+check('editing does not move the card', boardView(edited, itemList, now, {}).columns.todo.length, 1);
+let done = boardUpdateItem(items, itemId, { done: true });
+check('checking a card off files it under 完成', ids(boardView(done, itemList, now, {}).columns.done).includes(itemId), true);
+check('a checked card leaves 待办', ids(boardView(done, itemList, now, {}).columns.todo).includes(itemId), false);
+check('the done flag is persisted', boardParse(boardSerialize(done)).items[itemId].done, true);
+check('unchecking sends it back to 待办', ids(boardView(boardUpdateItem(done, itemId, { done: false }), itemList, now, {}).columns.todo).includes(itemId), true);
+check('updating an unknown id is a no-op', boardUpdateItem(items, 'nope', { title: 'x' }).items[itemId].title, '写周报');
+
+// moved / hidden / pruned / deleted
+check('a card can be parked in 搁置', ids(boardView(boardMove(items, itemId, 'shelved', -1, true), itemList, now, {}).columns.shelved), [itemId]);
+let pruned = boardPrune(items, [], now + 400 * BOARD_DAY_MS);
+check('prune never drops free-form cards', Object.keys(pruned.items), [itemId]);
+check('prune never drops their placement', boardView(pruned, itemList, now, {}).columns.todo.length, 1);
+check('deleting a card removes card and placement', [Object.keys(boardDeleteItem(items, itemId).items).length, Object.keys(boardDeleteItem(items, itemId).entries).length], [0, 0]);
+check('a free-form card is not a session for the purge path', boardIsItem(items, itemId), true);
+check('free-form cards ignore the workspace filter', boardView(items, itemList, now, { workspace: '/data/work/mdm' }).todoItems, 0);
+check('free-form cards obey the query filter', boardView(items, itemList, now, { query: '周报' }).todoItems, 1);
 
 // 7 — helpers
 check('workspace label is the last segment', boardWorkspace(session('x')), 'mdm');
