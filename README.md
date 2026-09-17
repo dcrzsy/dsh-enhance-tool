@@ -116,7 +116,8 @@ fuser -k 3080/tcp && nohup dsh web &   # 重启 dsh web
 
 - 侧边栏行**不显示所属列的小色点**：侧栏 DOM 里没有任何会话 id 属性（实测只有 class/role/aria-*；id 只在拖拽 payload 里），按标题匹配太脆，故不做。
 - **不与 `dsh-archived-chats` 联动**：那个插件自带 host 侧归档/回收站/保留策略与自己的路由，跨插件读它的内部状态很脆，且两套「真删」逻辑并存有风险；本看板的归档/垃圾桶只影响看板本身（面板底部有明确提示）。
-- 垃圾桶是**软删**（只从看板隐藏），不删除会话数据；真删应走 `dsh-archived-chats`。
+- 垃圾桶的**清空 = 真删尝试**（两步确认）：链路是「核心 `workspaces.archiveSession` 归档 → `dsh-archived-chats` 的 `/delete-all` 移入它的回收站 → `/trash/purge` 物理删除」，并带上它要求的 CSRF 头 `x-dsh-archived-chats: 1`；每个会话的失败原因会显示在垃圾桶列里（例如 `persistence-response-invalid`）。**dsh 核心没有删除会话的 API**（`workspace/delete` 删的是工作区登记，不是会话），所以真删只能借这个插件。
+- **注意**：实测本机装的 `dsh-archived-chats@1.1.0` 在 dsh 0.1.5 上**删不掉**：它校验会话头必须 `version === 2`，而 0.1.5 写的是 `version: 3`，因此其 `/delete-all` 对任何会话都回 `persistence-response-invalid`（它自己的回收站/删除大概也是坏的，建议更新或反馈给该插件作者）。在它能用之前，清空的效果是：**把卡片从看板移除（不再弹回待办/归档），会话本身仍在 dsh 里**；垃圾桶列头上的「恢复显示 N」可以把它们放回看板。
 
 ### 5. 注入控件与面板沿用 dsh 默认样式（不自带皮肤/容器外观）
 

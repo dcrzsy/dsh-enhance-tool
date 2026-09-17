@@ -15,7 +15,9 @@
  *      (repeated inserts at the same index must not collapse);
  *   5. pruning keeps unknown ids during the grace period and drops them after;
  *   6. the view filters (subagents off by default, query, workspace) and orders by
- *      placement then updatedAt, and trash only holds manual entries.
+ *      placement then updatedAt, and trash only holds manual entries;
+ *   7. hiding (a cleared trash whose real delete failed) keeps sessions off the board
+ *      until they are unhidden or deliberately moved again.
  *
  * Usage: node tools/board-logic-test.mjs   (exit 0 = all invariants hold)
  */
@@ -81,6 +83,10 @@ const FUNCS = [
   'boardPrune',
   'boardView',
   'boardForget',
+  'boardHide',
+  'boardUnhide',
+  'boardUndoAdd',
+  'boardUndoDrop',
   'boardWorkspace',
 ];
 const sandbox = new Function(
@@ -101,6 +107,10 @@ const {
   boardPrune,
   boardView,
   boardForget,
+  boardHide,
+  boardUnhide,
+  boardUndoAdd,
+  boardUndoDrop,
   boardWorkspace,
 } = sandbox;
 
@@ -205,6 +215,23 @@ check('query filters by title', boardView(boardEmptyState(), filtered, now, { qu
 check('query filters by cwd', boardView(boardEmptyState(), filtered, now, { query: 'report' }).total, 1);
 check('workspace filter', boardView(boardEmptyState(), filtered, now, { workspace: '/data/work/report' }).total, 1);
 check('total counts every rendered card', boardView(boardEmptyState(), filtered, now, {}).total, 3);
+
+// 6b — a cleared trash must not bounce back onto the board
+const three2 = listOf([session('h1'), session('h2')]);
+let hidden = boardHide(boardEmptyState(), ['h1']);
+check('hidden sessions leave the board', ids(boardView(hidden, three2, now, {}).columns.todo), ['h2']);
+check('hidden is persisted in the payload', boardParse(boardSerialize(hidden)).hidden, ['h1']);
+check('unhide brings them back', ids(boardView(boardUnhide(hidden), three2, now, {}).columns.todo), ['h1', 'h2']);
+check('a deliberate move unhides', boardHide(boardEmptyState(), ['h1']).hidden.length === 1 ? boardMove(boardHide(boardEmptyState(), ['h1']), 'h1', 'doing', -1, true).hidden : ['x'], []);
+check('prune drops hidden ids of vanished sessions', boardPrune(hidden, ['h2'], now).hidden, []);
+
+// 6c — undo bookkeeping for a clear that could not really delete
+let undoState = boardUndoAdd(boardHide(boardEmptyState(), ['u1']), ['u1']);
+check('undo ids are persisted', boardParse(boardSerialize(undoState)).undo, ['u1']);
+check('a restored session leaves the undo list', boardUndoDrop(undoState, ['u1']).undo, []);
+check('undo is idempotent', boardUndoAdd(undoState, ['u1']).undo, ['u1']);
+check('undo keeps ids of sessions that still exist', boardPrune(undoState, ['u1'], now).undo, ['u1']);
+check('undo drops ids of sessions that are gone and not hidden', boardPrune(boardUndoAdd(boardEmptyState(), ['u2']), [], now).undo, []);
 
 // 7 — helpers
 check('workspace label is the last segment', boardWorkspace(session('x')), 'mdm');
