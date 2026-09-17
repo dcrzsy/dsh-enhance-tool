@@ -277,6 +277,9 @@ check('a new to-do card starts on top of 待办', ids(boardView(items, itemList,
 check('a new to-do card is manual', boardView(items, itemList, now, {}).columns.todo[0].manual, true);
 check('an empty title is ignored', Object.keys(boardAddItem(boardEmptyState(), '   ').items).length, 0);
 check('item ids never look like session ids', boardItemId().startsWith('todo-'), true);
+const cwdItem = boardAddItem(boardEmptyState(), 'x', '/data/work/mdm');
+check('a card remembers the workspace it should run in', Object.values(boardParse(boardSerialize(cwdItem)).items)[0].cwd, '/data/work/mdm');
+check('a card without a workspace keeps an empty cwd', Object.values(boardAddItem(boardEmptyState(), 'x').items)[0].cwd, '');
 check('boardIsItem distinguishes cards from sessions', [boardIsItem(items, itemId), boardIsItem(items, 's1')], [true, false]);
 check('the payload keeps free-form cards', Object.keys(boardParse(boardSerialize(items)).items), [itemId]);
 check('the header reports free-form cards', boardView(items, itemList, now, {}).todoItems, 1);

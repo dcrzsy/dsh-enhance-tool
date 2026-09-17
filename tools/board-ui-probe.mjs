@@ -193,11 +193,11 @@ check('the header counts free-form cards', await page.evaluate(() => /条待办/
 
 if (created !== null) {
   const itemId = created.id;
-  // rename in place (double click)
-  await page.evaluate((id) => document.querySelector(`[data-enhc-card="${id}"]`).dispatchEvent(new MouseEvent('dblclick', { bubbles: true })), itemId);
+  // rename in place (✎ button: a plain click now means "run it")
+  await page.evaluate((id) => document.querySelector(`[data-enhc-card="${id}"] .enhc-board-item-edit`)?.click(), itemId);
   await sleep(300);
   const editOpen = await page.evaluate((id) => !!document.querySelector(`[data-enhc-card="${id}"] input.enhc-board-item-input`), itemId);
-  check('double click opens an inline editor', editOpen);
+  check('the ✎ button opens an inline editor', editOpen);
   await page.keyboard.down('Control');
   await page.keyboard.press('KeyA');
   await page.keyboard.up('Control');
@@ -215,7 +215,9 @@ if (created !== null) {
   await clickCardButton(itemId, '⋯');
   await sleep(300);
   const itemMenu = await page.evaluate(() => [...document.querySelectorAll('.enhc-board-menu button')].map((b) => b.textContent.trim()));
-  check('a to-do card menu has columns plus 删除 (no 垃圾桶)', itemMenu.includes('删除') && !itemMenu.includes('垃圾桶'), itemMenu.join(' | '));
+  check('a to-do card menu offers run/rename/columns/删除 (no 垃圾桶)',
+    itemMenu.includes('删除') && !itemMenu.includes('垃圾桶') && itemMenu.some((t) => /创建会话并执行/.test(t)) && itemMenu.includes('重命名'),
+    itemMenu.join(' | '));
   await page.evaluate(() => [...document.querySelectorAll('.enhc-board-menu button')].find((b) => b.textContent.trim() === '删除')?.click());
   await sleep(600);
   const gone = await page.evaluate((id) => !document.querySelector(`[data-enhc-card="${id}"]`), itemId);
@@ -318,6 +320,36 @@ if (SHOT !== '') {
 }
 await page.keyboard.press('Escape');
 await sleep(300);
+
+// --- opt-in: a card creates a real session and sends its first prompt (BOARD_PROBE_RUN=1)
+if (process.env.BOARD_PROBE_RUN === '1') {
+  await openBoard();
+  await page.evaluate(() => document.querySelector('.enhc-board-add')?.click());
+  await sleep(300);
+  await page.keyboard.type('probe 执行：只回复 ok', { delay: 6 });
+  await page.keyboard.press('Enter');
+  await sleep(300);
+  await page.keyboard.press('Escape');
+  await sleep(400);
+  const beforeIds = await page.evaluate(() => [...document.querySelectorAll('[data-enhc-card]')].map((c) => c.getAttribute('data-enhc-card')));
+  const runId = await page.evaluate(() => document.querySelector('[data-enhc-item]')?.getAttribute('data-enhc-card') ?? null);
+  if (runId !== null) {
+    await page.evaluate((id) => document.querySelector(`[data-enhc-card="${id}"] .enhc-board-item-run`)?.click(), runId);
+    await sleep(6000);
+    const after = await page.evaluate(() => ({
+      items: document.querySelectorAll('[data-enhc-item]').length,
+      note: document.querySelector('.enhc-board-note')?.textContent ?? '',
+      ids: [...document.querySelectorAll('[data-enhc-card]')].map((c) => c.getAttribute('data-enhc-card')),
+    }));
+    const created = after.ids.filter((id) => !beforeIds.includes(id) && !id.startsWith('todo-'));
+    check('▶ 执行 turns a card into a session', created.length === 1, created.join(','));
+    check('the card retires once its session exists', after.items === 0);
+    check('the board says a session was created and is running', /已创建会话并开始执行/.test(after.note), after.note);
+    if (created.length > 0) console.log(`CREATED SESSION (clean this up): ${created[0]}`);
+  } else {
+    check('▶ 执行 turns a card into a session', false, 'no to-do card found');
+  }
+}
 
 check('no console errors', errors.length === 0, errors.slice(0, 2).join(' || '));
 
