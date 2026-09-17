@@ -18,6 +18,8 @@ jobs:
           node --check lib/index.js
           node --check lib/polish-routes.js
           node --check lib/client.js
+          node --check tools/board-logic-test.mjs
+          node --check tools/board-ui-probe.mjs
       - name: Verify install.sh syntax
         run: bash -n install.sh
       - name: Verify board logic invariants

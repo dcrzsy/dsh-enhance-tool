@@ -8,8 +8,9 @@
  *
  * Covered invariants:
  *   1. payload parsing tolerates junk and drops unknown columns / bad orders;
- *   2. auto placement: running (or a running background job) → 进行中, finished →
- *      完成, recently touched → 待办, stale → 归档;
+ *   2. auto placement is projection-driven: running / queued prompt → 进行中, an
+ *      unanswered prompt or an open todo item → 待办, an answered Session inside the
+ *      recent window → 完成, older → 归档, and 搁置 is never automatic;
  *   3. a manual drop always beats the auto rule, and "reset to auto" gives it back;
  *   4. moves insert at an index with sparse orders that stay strictly increasing
  *      (repeated inserts at the same index must not collapse);
@@ -78,6 +79,10 @@ const FUNCS = [
   'boardParse',
   'boardSerialize',
   'boardJobsRunning',
+  'boardProjection',
+  'boardInboxBusy',
+  'boardPendingTodos',
+  'boardTurnState',
   'boardAutoColumn',
   'boardMove',
   'boardPrune',
@@ -147,14 +152,33 @@ check('bad order is coerced', boardParse(JSON.stringify({ entries: { a: { column
 check('serialize round-trips', boardParse(boardSerialize(boardMove(boardEmptyState(), 'a', 'doing', -1, true))).entries.a.column, 'doing');
 check('collapsed keeps known columns only', boardParse(JSON.stringify({ collapsed: ['todo', 'zzz'] })).collapsed, ['todo']);
 
-// 2 — auto placement
+// 2 — auto placement (driven by the Session projections the host exposes)
 const recent = session('recent');
-check('idle + recent -> 待办', boardAutoColumn(recent, [], now, BOARD_RECENT_DAYS), 'todo');
-check('running -> 进行中', boardAutoColumn({ ...recent, running: true }, [], now, BOARD_RECENT_DAYS), 'doing');
-check('running job -> 进行中', boardAutoColumn(recent, [{ status: 'running' }], now, BOARD_RECENT_DAYS), 'doing');
-check('stopping job -> 进行中', boardAutoColumn(recent, [{ status: 'stopping' }], now, BOARD_RECENT_DAYS), 'doing');
-check('completed -> 完成', boardAutoColumn({ ...recent, completed: true }, [], now, BOARD_RECENT_DAYS), 'done');
-check('stale -> 归档', boardAutoColumn({ ...recent, updatedAt: now - (BOARD_RECENT_DAYS + 1) * BOARD_DAY_MS }, [], now, BOARD_RECENT_DAYS), 'archived');
+const stale = { ...recent, updatedAt: now - (BOARD_RECENT_DAYS + 1) * BOARD_DAY_MS };
+const pv = (values) => ({ projectionValues: values });
+const answered = pv({ turnOutline: [{ turn: 1, prompt: 'do it', response: 'done' }] });
+const unanswered = pv({ turnOutline: [{ turn: 1, prompt: 'do it', response: '' }] });
+const place = (summary, jobs) => boardAutoColumn(summary, jobs ?? [], now, BOARD_RECENT_DAYS);
+
+check('running -> 进行中', place({ ...recent, running: true }), 'doing');
+check('running job -> 进行中', place(recent, [{ status: 'running' }]), 'doing');
+check('stopping job -> 进行中', place(recent, [{ status: 'stopping' }]), 'doing');
+check('queued prompt -> 进行中', place({ ...recent, ...pv({ inbox: { 'next-turn': [{ id: 'q' }], 'next-step': [] } }) }), 'doing');
+check('queued step -> 进行中', place({ ...recent, ...pv({ inbox: { 'next-turn': [], 'next-step': [{ id: 'q' }] } }) }), 'doing');
+check('answered + recent -> 完成', place({ ...recent, ...answered }), 'done');
+check('answered + stale -> 归档', place({ ...stale, ...answered }), 'archived');
+check('cold session (no projections) + recent -> 完成', place(recent), 'done');
+check('cold session + stale -> 归档', place(stale), 'archived');
+check('unanswered prompt -> 待办', place({ ...recent, ...unanswered }), 'todo');
+check('open todo item -> 待办', place({ ...recent, ...pv({ todos: [{ status: 'pending' }, { status: 'completed' }] }) }), 'todo');
+check('all todos completed -> not 待办', place({ ...recent, ...pv({ todos: [{ status: 'completed' }] }) }), 'done');
+check('never prompted (empty outline) + recent -> 待办', place({ ...recent, ...pv({ turnOutline: [] }) }), 'todo');
+check('open todo beats an answered turn', place({ ...recent, ...answered, ...pv({ todos: [{ status: 'in_progress' }] }) }), 'todo');
+check('open todo beats the recent window', place({ ...stale, ...pv({ todos: [{ status: 'pending' }] }) }), 'todo');
+check('搁置 is never automatic', BOARD_COLUMNS.filter((c) => c.key === 'shelved').length === 1
+  && [recent, stale, { ...recent, running: true }, { ...recent, ...answered }, { ...recent, ...unanswered },
+      { ...recent, ...pv({ todos: [{ status: 'pending' }] }) }, { ...recent, ...pv({ inbox: { 'next-turn': [{}] } }) }]
+      .every((summary) => place(summary) !== 'shelved'), true);
 
 // 3 — manual placement wins, reset hands it back
 const mixed = [
@@ -168,7 +192,7 @@ let view = boardView(state, listOf(mixed), now, {});
 check('manual beats auto', ids(view.columns.archived).includes('run1'), true);
 check('manual card left its auto column', ids(view.columns.doing).includes('run1'), false);
 check('stale session auto-lands in 归档 next to it', ids(view.columns.archived).includes('old1'), true);
-check('subagent hidden by default', ids(view.columns.todo), []);
+check('subagent hidden by default', ids(view.columns.done), []);
 check('blank sessions skipped', view.total, 2);
 check('subagents included on request', boardView(state, listOf(mixed), now, { includeSubs: true }).total, 3);
 state = boardForget(state, 'run1');
@@ -210,7 +234,7 @@ check('trash never shows an unplaced session', ids(boardView(state, listOf([sess
 check('trash hides a session that is not in the list', ids(boardView(state, filtered, now, {}).columns.trash), []);
 check('trash shows its manual entry', ids(boardView(state, listOf([session('t1')]), now, {}).columns.trash), ['t1']);
 view = boardView(boardEmptyState(), filtered, now, {});
-check('unplaced cards order by updatedAt desc', ids(view.columns.todo), ['a3', 'a1', 'a2']);
+check('unplaced cards order by updatedAt desc', ids(view.columns.done), ['a3', 'a1', 'a2']);
 check('query filters by title', boardView(boardEmptyState(), filtered, now, { query: '备份' }).total, 2);
 check('query filters by cwd', boardView(boardEmptyState(), filtered, now, { query: 'report' }).total, 1);
 check('workspace filter', boardView(boardEmptyState(), filtered, now, { workspace: '/data/work/report' }).total, 1);
@@ -219,9 +243,9 @@ check('total counts every rendered card', boardView(boardEmptyState(), filtered,
 // 6b — a cleared trash must not bounce back onto the board
 const three2 = listOf([session('h1'), session('h2')]);
 let hidden = boardHide(boardEmptyState(), ['h1']);
-check('hidden sessions leave the board', ids(boardView(hidden, three2, now, {}).columns.todo), ['h2']);
+check('hidden sessions leave the board', ids(boardView(hidden, three2, now, {}).columns.done), ['h2']);
 check('hidden is persisted in the payload', boardParse(boardSerialize(hidden)).hidden, ['h1']);
-check('unhide brings them back', ids(boardView(boardUnhide(hidden), three2, now, {}).columns.todo), ['h1', 'h2']);
+check('unhide brings them back', ids(boardView(boardUnhide(hidden), three2, now, {}).columns.done), ['h1', 'h2']);
 check('a deliberate move unhides', boardHide(boardEmptyState(), ['h1']).hidden.length === 1 ? boardMove(boardHide(boardEmptyState(), ['h1']), 'h1', 'doing', -1, true).hidden : ['x'], []);
 check('prune drops hidden ids of vanished sessions', boardPrune(hidden, ['h2'], now).hidden, []);
 
@@ -236,7 +260,7 @@ check('undo drops ids of sessions that are gone and not hidden', boardPrune(boar
 // 7 — helpers
 check('workspace label is the last segment', boardWorkspace(session('x')), 'mdm');
 check('workspace label of a rootless cwd', boardWorkspace(session('x', { cwd: undefined })), '');
-check('the board has five columns', BOARD_COLUMNS.map((column) => column.key), ['todo', 'doing', 'done', 'archived', 'trash']);
+check('the board has six columns', BOARD_COLUMNS.map((column) => column.key), ['todo', 'doing', 'done', 'shelved', 'archived', 'trash']);
 check('the board exposes labels', BOARD_COLUMNS.every((column) => typeof column.label === 'string' && column.label !== ''), true);
 
 if (failures.length > 0) {
