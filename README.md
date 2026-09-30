@@ -86,7 +86,7 @@ kill -INT <pid>
 |---|---|---|
 | **润色** | `/polish` API，用当前会话的模型重写草稿（默认润色 / 自定义要求润色） | `conversation.input.left` 按钮 |
 | **提示词库** | `/prompt-library` API，持久化 `~/.dsh/prompts.json`；支持分组 / 搜索 / 增删改 / 一键插入 | `conversation.input.left` 按钮 |
-| **预测回复（建议条）** | `/suggest` API，基于最后一条 AI 回复预测 3 条用户回复，点击**直接发送**（可在设置→通用→界面定制 改为“仅填入输入框”） | `conversation.input.dock` |
+| **预测回复（建议条）** | `/suggest` API：把**你的上一条提问 + AI 的最后一条回复**一起给模型，要求三条覆盖**不同意图**（推进 / 追问原因 / 换做法）并跟随对话语言；带「预测回复」标签与 `1/2/3` 序号的胶囊按钮。**点击直接发送**（设置可改为"仅填入输入框"）；**Shift+点击**或 **Alt+Shift+1/2/3** 只填入不发送；**Alt+1/2/3** 快捷选择 | `conversation.input.dock` |
 
 ### 2. 布局与宽度（设置页 + 运行时）
 
