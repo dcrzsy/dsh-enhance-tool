@@ -1,6 +1,6 @@
 {
   "name": "dsh-enhance-tool",
-  "version": "0.13.1",
+  "version": "0.14.0",
   "private": false,
   "type": "module",
   "main": "lib/index.js",
@@ -13,6 +13,9 @@
     },
     "./package.json": "./package.json"
   },
+  "peerDependencies": {
+    "@deepseek-ai/dsh": "^0.2.0-rc.2"
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
@@ -20,8 +23,6 @@
     "client": {
       "platform": "web",
       "inject": [
-        "@deepseek-ai/dsh-client-runtime",
-        "@deepseek-ai/dsh-client-ui-slots",
         "@deepseek-ai/dsh-client-ui-settings",
         "@deepseek-ai/dsh-client-locale",
         "@deepseek-ai/dsh-client-ui-conversation"

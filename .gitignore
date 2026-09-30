@@ -1,3 +1,7 @@
 *.log
 .DS_Store
 node_modules/
+
+# AgentTeams runtime state: task descriptions carry the local dsh web token and
+# other environment specifics. Never commit it.
+.agent-teams/

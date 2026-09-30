@@ -20,9 +20,26 @@ jobs:
           node --check lib/client.js
           node --check tools/board-logic-test.mjs
           node --check tools/board-ui-probe.mjs
+          node --check tools/board-archive-gate-test.mjs
       - name: Verify install.sh syntax
         run: bash -n install.sh
       - name: Verify board logic invariants
         run: node tools/board-logic-test.mjs
+      - name: Verify the B16 destructive-order regression net
+        run: node tools/board-archive-gate-test.mjs
+      - name: Verify the B16 net is not vacuous (negative controls)
+        # Each control rewrites lib/client.js in memory, requires the pristine suite to
+        # be green and the mutated one to turn red. `all` currently covers 8 controls:
+        #   gate         — the capability guard is short-circuited (in-function break)
+        #   reorder      — the guard is swapped with the archive loop
+        #   probe        — the capability probe always claims to be usable
+        #   move         — the caller archives through the core API, OUT of the slice
+        #   helper       — a new helper next to the caller owns the core archive call
+        #   move-route   — the caller calls /delete-all through the BOARD_ARCHIVE_BASE
+        #                  constant (round-2 review escape A: reuse, not re-spelling)
+        #   move-helper-route — a new top-level helper drives the route constant (escape C)
+        #   inline       — the caller re-spells the /plugins/dsh-archived-chats literal
+        # A B16 regression must fail CI here, not pass review.
+        run: node tools/board-archive-gate-test.mjs --mutate all
       - name: Verify injected stylesheet parses cleanly
         run: python3 tools/css-diff.py --lint --check
