@@ -18,7 +18,11 @@
  *   6. the view filters (subagents off by default, query, workspace) and orders by
  *      placement then updatedAt, and trash only holds manual entries;
  *   7. hiding (a cleared trash whose real delete failed) keeps sessions off the board
- *      until they are unhidden or deliberately moved again.
+ *      until they are unhidden or deliberately moved again;
+ *   8. a long column groups by workspace (first appearance order, one page per group) and
+ *      each 显示更多 tail belongs to — and sits at the end of — its own group, while an
+ *      ungrouped column keeps the single trailing tail; the drag slot → state index
+ *      translation anchors on the rendered card instead of the raw slot.
  *
  * Usage: node tools/board-logic-test.mjs   (exit 0 = all invariants hold)
  */
@@ -73,7 +77,7 @@ function grab(name) {
   return source.slice(fn, bodyClose + 1);
 }
 
-const CONSTS = ['BOARD_COLUMNS', 'BOARD_DAY_MS', 'BOARD_RECENT_DAYS', 'BOARD_PRUNE_DAYS', 'BOARD_ITEM_TITLE_MAX'];
+const CONSTS = ['BOARD_COLUMNS', 'BOARD_DAY_MS', 'BOARD_RECENT_DAYS', 'BOARD_PRUNE_DAYS', 'BOARD_ITEM_TITLE_MAX', 'BOARD_COLUMN_PAGE'];
 const FUNCS = [
   'boardEmptyState',
   'boardParse',
@@ -98,6 +102,9 @@ const FUNCS = [
   'boardUndoAdd',
   'boardUndoDrop',
   'boardWorkspace',
+  'boardCardGroup',
+  'boardPathLabel',
+  'boardColumnGroups',
 ];
 const sandbox = new Function(
   'ptL',
@@ -110,6 +117,7 @@ const {
   BOARD_DAY_MS,
   BOARD_RECENT_DAYS,
   BOARD_ITEM_TITLE_MAX,
+  BOARD_COLUMN_PAGE,
   boardEmptyState,
   boardParse,
   boardSerialize,
@@ -128,6 +136,9 @@ const {
   boardUndoAdd,
   boardUndoDrop,
   boardWorkspace,
+  boardCardGroup,
+  boardPathLabel,
+  boardColumnGroups,
 } = sandbox;
 
 const failures = [];
@@ -311,6 +322,186 @@ check('workspace label is the last segment', boardWorkspace(session('x')), 'mdm'
 check('workspace label of a rootless cwd', boardWorkspace(session('x', { cwd: undefined })), '');
 check('the board has six columns', BOARD_COLUMNS.map((column) => column.key), ['todo', 'doing', 'done', 'shelved', 'archived', 'trash']);
 check('the board exposes labels', BOARD_COLUMNS.every((column) => typeof column.label === 'string' && column.label !== ''), true);
+
+// 8 — workspace grouping in a long column (t1) and the drag slot translation (t4).
+// t3's U6: these declarations had no case in this file. The two helpers that live inside
+// BoardDialog (the slot closure and the JSX column callback) are sliced out of the shipped
+// source and run against stubs, so both the pure functions and the RENDER ORDER of a
+// grouped column are asserted against the real code: reverting a fix turns them red.
+const groupCard = (id, cwd) => ({ id, summary: { id, cwd, updatedAt: now - 1000, running: false }, jobs: [], openTodos: 0, manual: false, autoColumn: 'archived', order: 0 });
+const groupItem = (id, cwd) => ({ id, item: { title: id, done: false, at: now, cwd }, summary: null, jobs: [], openTodos: 0, manual: true, autoColumn: null, order: 0 });
+
+check('a session card is grouped by its own cwd', boardCardGroup(groupCard('a1', '/data/work/mdm')), '/data/work/mdm');
+check('a free-form card is grouped by its own cwd', boardCardGroup(groupItem('t1', '/data/work/report')), '/data/work/report');
+check('a card without a cwd joins the unlabelled group', [boardCardGroup(groupCard('a1', '')), boardCardGroup({ summary: null }), boardCardGroup({ item: {} })], ['', '', '']);
+check('group label is the last path segment', boardPathLabel('/data/work/mdm'), 'mdm');
+check('group label tolerates a trailing slash', boardPathLabel('/data/work/mdm/'), 'mdm');
+check('group label of an empty path is shared', boardPathLabel(''), '未标注工作区');
+check('group label of a bare slash is shared', boardPathLabel('/'), '未标注工作区');
+check('grouping is off for an empty column', boardColumnGroups([], true), []);
+check('grouping is off when the caller says so', boardColumnGroups([groupCard('a1', '/w/a')], false), []);
+check('a single workspace has nothing to separate', boardColumnGroups([groupCard('a1', '/w/a'), groupCard('a2', '/w/a')], true), []);
+const mixedGroupCards = [groupCard('a1', '/w/a'), groupCard('b1', '/w/b'), groupItem('t1', '/w/a'), groupCard('b2', '/w/b'), groupCard('c1', '/w/c')];
+const mixedGroups = boardColumnGroups(mixedGroupCards, true);
+check('groups follow first appearance, not sorting', mixedGroups.map((group) => group.key), ['/w/a', '/w/b', '/w/c']);
+check('every card lands in its own group, in column order', mixedGroups.map((group) => ids(group.cards)), [['a1', 't1'], ['b1', 'b2'], ['c1']]);
+check('groups are labelled by their last segment', mixedGroups.map((group) => group.label), ['a', 'b', 'c']);
+check('grouping keeps every card exactly once', mixedGroups.reduce((total, group) => total + group.cards.length, 0), mixedGroupCards.length);
+
+/** Slice one `const NAME = ... => { ... }` declaration out of the shipped source. */
+const sliceArrow = (declaration) => {
+  const at = source.indexOf(declaration);
+  if (at < 0) throw new Error(`lib/client.js no longer defines "${declaration}"`);
+  const bodyOpen = source.indexOf('{', at + declaration.length - 1);
+  const bodyClose = matchDelimiter(source, bodyOpen);
+  if (bodyClose < 0) throw new Error(`unterminated body for "${declaration}"`);
+  return source.slice(at, bodyClose + 1);
+};
+/**
+ * Run sliced product code with `scope` as its innermost scope. Unknown identifiers resolve
+ * to a no-op function, so a new helper inside the sliced block cannot break this harness by
+ * accident — only a change to the behaviour the cases below assert can.
+ */
+const runWithScope = (code, scope) => {
+  const forgiving = new Proxy(scope, {
+    // names the scope does not carry are only absorbed when they are not real globals,
+    // so `Array`, `String`, ... keep working while a new helper in the sliced block
+    // degrades to a no-op instead of a ReferenceError
+    has: (target, prop) => prop in target || typeof prop !== 'string' || prop in globalThis === false,
+    get: (target, prop) => (prop in target ? target[prop] : () => void 0),
+  });
+  return new Function('scope', `with (scope) { ${code} }`)(forgiving);
+};
+
+// — the drop slot -> state index translation (a closure inside BoardDialog)
+const slotHost = { colRefs: { current: {} }, view: { columns: {} } };
+const slotIndex = runWithScope(`${sliceArrow('const slotIndex = (key, slot) => {')}; return slotIndex;`, slotHost);
+const fakeColumnBody = (renderedIds) => ({ querySelectorAll: () => renderedIds.map((id) => ({ getAttribute: () => id })) });
+const slotOf = (key, environment, slot) => {
+  slotHost.view.columns[key] = environment === null ? void 0 : environment.all.map((id) => ({ id }));
+  slotHost.colRefs.current[key] = environment === null ? void 0 : fakeColumnBody(environment.rendered);
+  return slotIndex(key, slot);
+};
+
+check('a negative slot keeps its "append" meaning', slotOf('archived', { rendered: ['a', 'b'], all: ['a', 'b'] }, -1), -1);
+check('a column with no rendered card has no slot', slotOf('archived', { rendered: [], all: [] }, 0), -1);
+check('a missing column body has no slot', slotOf('archived', null, 0), -1);
+check('an ungrouped column maps the slot straight through', slotOf('archived', { rendered: ['a', 'b', 'c'], all: ['a', 'b', 'c'] }, 1), 1);
+check('a paginated ungrouped column keeps the slot', slotOf('archived', { rendered: ['a', 'b'], all: ['a', 'b', 'c', 'd'] }, 1), 1);
+check('a drop under the last rendered card appends after it', slotOf('archived', { rendered: ['a', 'b'], all: ['a', 'b', 'c', 'd'] }, 2), 2);
+check('a grouped column anchors on the card that was aimed at', slotOf('archived', { rendered: ['b1', 'b2', 'a1'], all: ['a1', 'b1', 'a2', 'b2'] }, 0), 1);
+check('a grouped column anchors on a mid-list card', slotOf('archived', { rendered: ['b1', 'b2', 'a1'], all: ['a1', 'b1', 'a2', 'b2'] }, 1), 3);
+check('a grouped drop under the last rendered card lands after it', slotOf('archived', { rendered: ['b1', 'b2', 'a1'], all: ['a1', 'b1', 'a2', 'b2'] }, 3), 1);
+check('an anchor that is not on the board has no slot', slotOf('archived', { rendered: ['zz'], all: ['a1'] }, 0), -1);
+
+// — the column renderer: one head per workspace, cards, then that group's own 显示更多
+const columnCallbackSlice = sliceArrow('BOARD_COLUMNS.map((column) => {');
+const columnCallback = columnCallbackSlice.slice(columnCallbackSlice.indexOf('(column) =>'));
+const renderColumn = (column, cards, options = {}) => runWithScope(`return (${columnCallback});`, {
+  jsx: (type, props) => ({ type, props }),
+  jsxs: (type, props) => ({ type, props }),
+  BoardCard: 'BoardCard',
+  BoardItemCard: 'BoardItemCard',
+  BoardAddItem: 'BoardAddItem',
+  ptL: (zh) => zh,
+  view: { columns: { [column.key]: cards } },
+  state: { collapsed: options.collapsed === true ? [column.key] : [] },
+  ui: { all: options.all === true, query: options.query ?? '', select: options.select === true, over: null, more: options.more ?? {}, picked: [], dragged: null, menuFor: null, confirmClear: false },
+  now,
+  BOARD_COLUMN_PAGE,
+  BOARD_RECENT_DAYS,
+  BOARD_DAY_MS,
+  BOARD_COLUMNS,
+  boardColumnGroups,
+  archiveReady: null,
+  purgeNote: '',
+  boardOnlyTrash: false,
+  runBusy: null,
+})(column);
+const columnBodyOf = (element) => {
+  const children = element?.props?.children;
+  return Array.isArray(children) ? children[1]?.props?.children ?? null : null;
+};
+const planNodesOf = (element) => {
+  const body = columnBodyOf(element);
+  if (body === null || body === void 0) return [];
+  return (Array.isArray(body) ? body : [body]).filter((node) => node !== null && node !== void 0).map((node) => {
+    const className = String(node?.props?.className ?? '');
+    if (className.includes('enhc-board-group-head')) return { kind: 'head', label: String(node.props.children[0]?.props?.children ?? '') };
+    if (className === 'enhc-board-more') return { kind: 'tail', text: String(node.props.children ?? '') };
+    if (node.type === 'BoardCard' || node.type === 'BoardItemCard') return { kind: 'card', id: node.props.card.id };
+    if (node.type === 'BoardAddItem') return { kind: 'add' };
+    if (className.includes('enhc-board-insert')) return { kind: 'insert' };
+    return { kind: 'other', className };
+  });
+};
+/** Nodes between one group head and the next: its cards, then at most its own tail. */
+const groupSectionsOf = (element) => {
+  const sections = [];
+  for (const node of planNodesOf(element)) {
+    if (node.kind === 'head') {
+      sections.push({ label: node.label, cards: [], tails: [], pattern: '' });
+      continue;
+    }
+    const section = sections[sections.length - 1];
+    if (section === void 0) continue;
+    if (node.kind === 'card') {
+      section.cards.push(node.id);
+      section.pattern += 'c';
+    } else if (node.kind === 'tail') {
+      section.tails.push(node.text);
+      section.pattern += 't';
+    }
+  }
+  return sections;
+};
+const sectionShapeOf = (element) => groupSectionsOf(element).map((section) => `${section.label}:${section.cards.length}c${section.tails.length === 0 ? '' : `,${section.tails.length}tail`}`);
+const brokenShapesOf = (element) => groupSectionsOf(element).filter((section) => /^c+t?$/.test(section.pattern) === false).map((section) => `${section.label}=${section.pattern}`);
+const misplacedTailsOf = (element) => groupSectionsOf(element).filter((section) => section.tails.some((text) => text.includes(section.label) === false)).map((section) => `${section.label} <- ${section.tails.join(' / ')}`);
+const tailRemaindersOf = (element) => groupSectionsOf(element).filter((section) => section.tails.length > 0).map((section) => {
+  const match = /剩 (\d+) 个/.exec(section.tails[0]);
+  return [section.label, match === null ? null : Number(match[1])];
+});
+
+// four workspaces, interleaved so the grouping really is a stable partition; alpha and
+// gamma both need more than one page (BOARD_COLUMN_PAGE each)
+const bigGroupCards = [];
+for (let i = 0; i < 23; i += 1) {
+  bigGroupCards.push(groupCard(`a${i}`, '/w/alpha'));
+  if (i < 21) bigGroupCards.push(groupCard(`c${i}`, '/w/gamma'));
+  if (i < 3) bigGroupCards.push(groupCard(`b${i}`, '/w/beta'));
+  if (i < 2) bigGroupCards.push(groupCard(`d${i}`, '/w/delta'));
+}
+const archivedColumn = BOARD_COLUMNS.find((column) => column.key === 'archived');
+const bigColumn = renderColumn(archivedColumn, bigGroupCards, {});
+check('group order follows first appearance', sectionShapeOf(bigColumn).map((shape) => shape.split(':')[0]), ['alpha', 'gamma', 'beta', 'delta']);
+check('each group renders its own page and its own tail', sectionShapeOf(bigColumn), ['alpha:20c,1tail', 'gamma:20c,1tail', 'beta:3c', 'delta:2c']);
+check('a group section is cards and then at most one tail', brokenShapesOf(bigColumn), []);
+check('every tail names the group it expands', misplacedTailsOf(bigColumn), []);
+check('every tail reports its own group\'s remainder', tailRemaindersOf(bigColumn), [['alpha', 3], ['gamma', 1]]);
+check('a tail carries the group in its title', planNodesOf(bigColumn).filter((node) => node.kind === 'tail').length, 2);
+
+// a group that was paged once keeps its own budget (ui.more is keyed per column+workspace)
+const pagedColumn = renderColumn(archivedColumn, bigGroupCards, { more: { 'archived|/w/alpha': 20 } });
+check('a paged group shows its next page and drops its tail', sectionShapeOf(pagedColumn), ['alpha:23c', 'gamma:20c,1tail', 'beta:3c', 'delta:2c']);
+check('paging one group leaves the other groups alone', sectionShapeOf(pagedColumn).length, 4);
+
+// short column, single workspace, search mode and batch mode keep the plain paginated path
+const shortColumn = renderColumn(archivedColumn, [groupCard('a1', '/w/a'), groupCard('b1', '/w/b')], {});
+check('a short column renders no group heads', sectionShapeOf(shortColumn), []);
+check('a short column renders both cards', planNodesOf(shortColumn).filter((node) => node.kind === 'card').length, 2);
+const oneWorkspaceColumn = renderColumn(archivedColumn, Array.from({ length: 30 }, (_, i) => groupCard(`s${i}`, '/w/only')), {});
+check('a single-workspace column renders no group heads', sectionShapeOf(oneWorkspaceColumn), []);
+check('a single-workspace column keeps the plain tail', planNodesOf(oneWorkspaceColumn).filter((node) => node.kind === 'tail').map((node) => node.text), ['显示更多（剩 10 个）']);
+// the contrast that matters: an ungrouped column still spends ONE global page budget and
+// puts its single tail after it, while a grouped column pages each workspace on its own
+check('the ungrouped column spends one global page', planNodesOf(oneWorkspaceColumn).map((node) => node.kind).join(','), `${'card,'.repeat(BOARD_COLUMN_PAGE)}tail`);
+const searchedColumn = renderColumn(archivedColumn, bigGroupCards, { query: 'x' });
+check('search mode renders every card with no heads and no tail', [sectionShapeOf(searchedColumn).length, planNodesOf(searchedColumn).filter((node) => node.kind === 'card').length, planNodesOf(searchedColumn).filter((node) => node.kind === 'tail').length], [0, bigGroupCards.length, 0]);
+const batchedColumn = renderColumn(archivedColumn, bigGroupCards, { select: true });
+check('batch mode renders every card with no heads and no tail', [sectionShapeOf(batchedColumn).length, planNodesOf(batchedColumn).filter((node) => node.kind === 'card').length, planNodesOf(batchedColumn).filter((node) => node.kind === 'tail').length], [0, bigGroupCards.length, 0]);
+const collapsedColumn = renderColumn(archivedColumn, bigGroupCards, { collapsed: true });
+check('a collapsed column renders no body at all', columnBodyOf(collapsedColumn), null);
 
 if (failures.length > 0) {
   console.error(`\n${failures.length} invariant(s) failed`);

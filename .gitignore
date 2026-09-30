@@ -5,3 +5,8 @@ node_modules/
 # AgentTeams runtime state: task descriptions carry the local dsh web token and
 # other environment specifics. Never commit it.
 .agent-teams/
+
+# Audit / review evidence (reports/**): screenshots and notes captured from the
+# maintainer's own machine contain session titles and other business context.
+# Kept locally as evidence; never published. See reports/compat-0.2.0/REPORT.md.
+reports/
