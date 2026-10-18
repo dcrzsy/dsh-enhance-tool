@@ -33,14 +33,16 @@
  *   1. the runtime slice (groups A–F): when the archive plugin is unavailable, the
  *      owner must archive nothing at all;
  *   2. a whole-bundle ownership assertion (group G): the only declarations in the
- *      shipped `lib/client.js` that may reference the core `archiveSession` API or the
- *      `BOARD_ARCHIVE_BASE` route constant are the gated owner (`boardDeleteSessions`),
- *      its capability probe and the restore declarations — an EXPLICIT allow-list, so a
- *      newly added `boardArchive*` helper is not waved through. Every
- *      `BOARD_ARCHIVE_BASE` reference outside its own declaration must lie inside that
- *      set; the route literal may be spelled exactly once (at the declaration); every
- *      directly written `archiveSession` reference must lie inside the gated owner; and
- *      `boardBridge` may not be accessed with a computed key outside the allow-list.
+ *      shipped `lib/client.js` that may reference the core `archiveSession` API are the
+ *      gated owner (`boardDeleteSessions`) and the board's OPT-IN archive owner
+ *      (`boardArchiveSessions`, the 「看板归档时同时从侧栏收起会话」 switch, off by
+ *      default) — an EXPLICIT two-name allow-list, so any OTHER newly added
+ *      `boardArchive*` helper is still not waved through. For the `BOARD_ARCHIVE_BASE`
+ *      route constant the allow-list stays the gated owner + its capability probe + the
+ *      restore declarations; every `BOARD_ARCHIVE_BASE` reference outside its own
+ *      declaration must lie inside that set; the route literal may be spelled exactly
+ *      once (at the declaration); and `boardBridge` may not be accessed with a computed
+ *      key outside the route allow-list.
  *
  *      Residual limitation (known, deliberate — not to be chased): these are TEXT-level
  *      assertions over **directly written references** (`BOARD_ARCHIVE_BASE`,
@@ -71,9 +73,10 @@
  *   G  ownership (whole bundle): every `BOARD_ARCHIVE_BASE` reference outside its own
  *      declaration must lie inside `boardDeleteSessions` or an allowed restore
  *      declaration; the route literal is spelled only at that declaration; every
- *      direct `archiveSession` reference lies inside the gated owner; no computed
- *      member access on `boardBridge` outside the owner; and inside the owner the gate
- *      exists, precedes the archive loop and is an early return.
+ *      direct `archiveSession` reference lies inside the gated owner or the opt-in
+ *      `boardArchiveSessions` owner (exactly those two, both named explicitly); no
+ *      computed member access on `boardBridge` outside the route allow-list; and inside
+ *      the owner the gate exists, precedes the archive loop and is an early return.
  *
  * Why the implementation is sliced out of the bundle instead of re-implemented
  * ---------------------------------------------------------------------------
@@ -517,7 +520,6 @@ function runSuite(src, options = {}) {
     const owner = ranges.boardDeleteSessions;
     const archiveHits = [...src.matchAll(/\barchiveSession\b/g)].map((match) => match.index);
     const routeHits = [...src.matchAll(/\/plugins\/dsh-archived-chats/g)].map((match) => match.index);
-    const insideOwner = (index) => index >= owner.start && index < owner.end;
     const ownerText = owner.text;
     const gateAt = ownerText.indexOf('await boardArchiveAvailable()');
     const returnAt = ownerText.indexOf('return out;', Math.max(gateAt, 0));
@@ -531,6 +533,15 @@ function runSuite(src, options = {}) {
       .map((name) => ranges[name])
       .filter((range) => range !== undefined);
     const insideRouteAllowed = (index) => routeAllowedRanges.some((range) => index >= range.start && index < range.end);
+    // Declarations allowed to name the core `archiveSession` API: the gated 清空 owner and
+    // the board's OPT-IN 「看板归档时同时从侧栏收起会话」 owner. Exactly two, both spelled
+    // out here — a THIRD declaration that archives stays red (round-2 escapes A/C), and
+    // neither of these two may fall back to the archive plugin's routes (that is the
+    // route allow-list above, which `boardArchiveSessions` is deliberately NOT part of).
+    const archiveAllowedRanges = ['boardDeleteSessions', 'boardArchiveSessions']
+      .map((name) => ranges[name])
+      .filter((range) => range !== undefined);
+    const insideArchiveAllowed = (index) => archiveAllowedRanges.some((range) => index >= range.start && index < range.end);
     const declarationRange = ranges.BOARD_ARCHIVE_BASE;
     const baseReferences = [...src.matchAll(/\bBOARD_ARCHIVE_BASE\b/g)]
       .map((match) => match.index)
@@ -551,8 +562,10 @@ function runSuite(src, options = {}) {
     check('G', 'the route literal is spelled exactly once, inside the BOARD_ARCHIVE_BASE declaration (no caller may re-spell it)',
       [routeHits.length, routeHits.every((index) => index >= declarationRange.start && index < declarationRange.end)], [1, true]);
     check('G', 'the core archiveSession API is named at least once (canary)', archiveHits.length >= 1, true);
-    check('G', 'every directly written archiveSession reference lies inside the gated owner (no caller/helper may own an archive)',
-      archiveHits.map((index) => insideOwner(index)), archiveHits.map(() => true));
+    check('G', 'exactly two owners may name archiveSession, and both exist (the gated 清空 owner + the opt-in board-archive owner)',
+      [archiveAllowedRanges.length, insideArchiveAllowed(archiveAt + owner.start)], [2, true]);
+    check('G', 'every directly written archiveSession reference lies inside the gated owner or the opt-in board-archive owner (no third caller/helper may own an archive)',
+      archiveHits.map((index) => insideArchiveAllowed(index)), archiveHits.map(() => true));
     check('G', 'no computed member access on boardBridge outside the owner/restore declarations (lightweight dynamic-name guard)',
       [...src.matchAll(/boardBridge\s*\[/g)].map((match) => match.index).map((index) => insideRouteAllowed(index)),
       [...src.matchAll(/boardBridge\s*\[/g)].map(() => true));

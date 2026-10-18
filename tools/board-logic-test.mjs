@@ -22,7 +22,11 @@
  *   8. a long column groups by workspace (first appearance order, one page per group) and
  *      each 显示更多 tail belongs to — and sits at the end of — its own group, while an
  *      ungrouped column keeps the single trailing tail; the drag slot → state index
- *      translation anchors on the rendered card instead of the raw slot.
+ *      translation anchors on the rendered card instead of the raw slot;
+ *   9. the optional 「看板归档时同时从侧栏收起会话」 switch (default OFF): its decision is
+ *      pure and table-tested, and the SAFETY VALVE is asserted on the shipped source —
+ *      no declaration on the automatic-placement path may name the archive API, and only
+ *      the board dialog's manual handlers may reach the two sidebar-step owners.
  *
  * Usage: node tools/board-logic-test.mjs   (exit 0 = all invariants hold)
  */
@@ -105,6 +109,8 @@ const FUNCS = [
   'boardCardGroup',
   'boardPathLabel',
   'boardColumnGroups',
+  'boardSidebarAction',
+  'boardArchiveTracked',
 ];
 const sandbox = new Function(
   'ptL',
@@ -139,6 +145,8 @@ const {
   boardCardGroup,
   boardPathLabel,
   boardColumnGroups,
+  boardSidebarAction,
+  boardArchiveTracked,
 } = sandbox;
 
 const failures = [];
@@ -502,6 +510,75 @@ const batchedColumn = renderColumn(archivedColumn, bigGroupCards, { select: true
 check('batch mode renders every card with no heads and no tail', [sectionShapeOf(batchedColumn).length, planNodesOf(batchedColumn).filter((node) => node.kind === 'card').length, planNodesOf(batchedColumn).filter((node) => node.kind === 'tail').length], [0, bigGroupCards.length, 0]);
 const collapsedColumn = renderColumn(archivedColumn, bigGroupCards, { collapsed: true });
 check('a collapsed column renders no body at all', columnBodyOf(collapsedColumn), null);
+
+// 9 — the optional 「看板归档时同时从侧栏收起会话」 switch (default OFF).
+// The decision is a pure function, so its whole table is pinned here; the SAFETY VALVE —
+// the automatic rules must never be able to hide a Session — is asserted against the
+// shipped source at the end of this section, because "a Session silently left the sidebar"
+// is the one failure this feature must never have.
+const step = (options) => boardSidebarAction(options);
+check('the new switch ships OFF', /boardArchiveHides:\s*false/.test(grab('DEFAULT_STATE')), true);
+check('an older/unknown persisted value normalizes to the switch', /boardArchiveHides/.test(grab('loadState')), true);
+check('applyState publishes the switch to the board', /boardSettings\.archiveHides\s*=\s*state\.boardArchiveHides === true/.test(grab('applyState')), true);
+check('switch OFF: a move into 归档 archives nothing', step({ enabled: false, isSession: true, from: 'todo', to: 'archived', tracked: false }), 'none');
+check('switch OFF: a move out of 归档 restores nothing either', step({ enabled: false, isSession: true, from: 'archived', to: 'todo', tracked: true }), 'none');
+check('switch ON: a manual move into 归档 archives', step({ enabled: true, isSession: true, from: 'todo', to: 'archived', tracked: false }), 'archive');
+check('switch ON: a manual move out of 归档 (marker set) unarchives', step({ enabled: true, isSession: true, from: 'archived', to: 'doing', tracked: true }), 'unarchive');
+check('switch ON: 归档 → 垃圾桶 restores first instead of leaving it hidden', step({ enabled: true, isSession: true, from: 'archived', to: 'trash', tracked: true }), 'unarchive');
+check('a move out of an auto-placed 归档 card touches nothing', step({ enabled: true, isSession: true, from: 'archived', to: 'todo', tracked: false }), 'none');
+check('re-dropping inside 归档 is not a second archive', step({ enabled: true, isSession: true, from: 'archived', to: 'archived', tracked: true }), 'none');
+check('a free-form to-do card never archives (it has no Session)', step({ enabled: true, isSession: false, from: 'todo', to: 'archived', tracked: false }), 'none');
+check('a free-form to-do card never unarchives', step({ enabled: true, isSession: false, from: 'archived', to: 'todo', tracked: true }), 'none');
+check('归档 is the only column the step reacts to', ['done', 'shelved', 'trash', 'doing'].map((to) => step({ enabled: true, isSession: true, from: 'todo', to, tracked: true })), ['none', 'none', 'none', 'none']);
+check('a missing from-column still archives: only the switch, the card kind and the target decide', step({ enabled: true, isSession: true, to: 'archived', tracked: false }), 'archive');
+
+// the marker that makes a move OUT of 归档 reversible
+const manualArchived = boardMove(boardEmptyState(), 'm1', 'archived', -1, true);
+check('a manual 归档 placement is the "this feature hid it" marker', boardArchiveTracked(manualArchived, 'm1'), true);
+check('the marker survives the storage round-trip', boardArchiveTracked(boardParse(boardSerialize(manualArchived)), 'm1'), true);
+check('an automatic placement is not a marker', boardArchiveTracked(boardMove(boardEmptyState(), 'm1', 'archived', -1, false), 'm1'), false);
+check('a manual placement in another column is not a marker', boardArchiveTracked(boardMove(boardEmptyState(), 'm1', 'shelved', -1, true), 'm1'), false);
+check('reset-to-auto drops the marker', boardArchiveTracked(boardForget(manualArchived, 'm1'), 'm1'), false);
+
+/**
+ * Declarations that own the automatic placement (or the raw board state): none of them
+ * may name the sidebar step or the core archive API. If one ever does, a rule-driven
+ * card could hide its Session from the sidebar — exactly the regression this pins.
+ */
+const RULE_PATH_DECLS = [
+  'boardAutoColumn', 'boardView', 'boardMove', 'boardPrune', 'boardWatchRunning',
+  'boardForget', 'boardAddItem', 'boardUpdateItem', 'boardDeleteItem',
+  'boardHide', 'boardUnhide', 'boardUndoAdd', 'boardUndoDrop',
+];
+const rulePathText = RULE_PATH_DECLS.map((name) => grab(name)).join('\n');
+check('no automatic-placement declaration can reach the sidebar step',
+  /boardSidebarAction|boardArchiveSessions|boardUnarchiveSessions|archiveSession|unarchiveSession/.test(rulePathText), false);
+const coldStale = { ...session('coldStale'), updatedAt: now - 30 * BOARD_DAY_MS };
+check('the rules really do put a stale Session in 归档 (so the valve protects a live path)',
+  ids(boardView(boardEmptyState(), listOf([coldStale]), now, {}).columns.archived), ['coldStale']);
+
+/** The two owners allowed to touch the sidebar, and the board dialog that drives them. */
+const stepOwners = ['boardArchiveSessions', 'boardUnarchiveSessions'].map((name) => {
+  const text = grab(name);
+  const at = source.indexOf(text);
+  return { name, text, start: at, end: at + text.length };
+});
+const dialogText = grab('BoardDialog');
+const dialogAt = source.indexOf(dialogText);
+const inRange = (index, range) => index >= range.start && index < range.end;
+const stepCalls = [...source.matchAll(/boardArchiveSessions\s*\(|boardUnarchiveSessions\s*\(/g)]
+  .map((match) => match.index)
+  .filter((index) => !stepOwners.some((owner) => inRange(index, owner)));
+check('the sidebar step is called only from inside the board dialog',
+  stepCalls.every((index) => inRange(index, { start: dialogAt, end: dialogAt + dialogText.length })), true);
+check('the board dialog really calls both owners (canary: the assertion above is not vacuous)', stepCalls.length, 2);
+check('the archive owner uses the CORE Workspace controller, never the archive plugin',
+  /boardBridge\.workspaces/.test(stepOwners[0].text) && /\.archiveSession\(/.test(stepOwners[0].text)
+  && !/BOARD_ARCHIVE_BASE|dsh-archived-chats/.test(stepOwners[0].text), true);
+check('the unarchive owner uses the core unarchive API',
+  /\.unarchiveSession\(/.test(stepOwners[1].text) && !/BOARD_ARCHIVE_BASE|dsh-archived-chats/.test(stepOwners[1].text), true);
+check('neither owner swallows a failure (both report per-id reasons)',
+  stepOwners.every((owner) => /reasons/.test(owner.text) && /catch/.test(owner.text)), true);
 
 if (failures.length > 0) {
   console.error(`\n${failures.length} invariant(s) failed`);

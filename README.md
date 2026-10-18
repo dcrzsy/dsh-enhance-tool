@@ -98,6 +98,7 @@ kill -INT <pid>
 | **用户消息自适应宽度** | `fit-content + max-width:100%`：内容少小气泡、内容多撑满整列 |
 | **用户长消息折叠** | 渲染行 > 5 行自动折叠，点击展开/收起（含历史消息） |
 | **任务看板（通用面板）** | 会话头部「轨迹」右侧的「看板」页签式入口：待办 / 进行中 / 完成 / 搁置 / 归档 / 垃圾桶六列；卡片默认是会话，**「待办」列可新建自由待办卡，点一下就建会话并开始执行**；支持拖拽跨列与列内排序、批量选择、列折叠、搜索/工作区过滤、自动归类 | 设置 → 通用 → 通用面板 |
+| **看板归档时同时从侧栏收起会话** | **默认关闭**。开启后只有**手动**把卡片移入「归档」列（拖拽 / ⋯菜单 / 批量 / 「归档过期」）才调用核心 `workspaces.archiveSession` 把会话从侧栏收起，移出「归档」列用核心 `unarchiveSession` 恢复；**规则自动归类永不触发**；失败写进看板提示栏 | 设置 → 通用 → 看板归档时同时从侧栏收起会话 |
 | **消息工具条常显** | 每条消息常显发送时间与复制 / 分叉 / 调用量 / 耗时按钮（当天 `HH:mm`，跨天带日期）——产品默认需悬浮才显示 | 设置 → 通用 → 消息工具条常显 |
 | **工具调用耗时** | 每条工具调用与子工具（PTC 子调用）右侧常显耗时（`296ms` / `2分02秒`）；**进行中的调用实时计时**（蓝色脉动，如 `35s…`），完成后自动定型；悬浮显示开始 / 结束时刻 | 设置 → 通用 → 工具调用耗时 |
 | **面板打开时消息区让位** | 工作台面板 / 侧边栏打开时消息列自适应，不重叠不压缩 |
@@ -182,10 +183,20 @@ kill -INT <pid>
 **已知限制 / 有意未做**
 
 - 侧边栏行**不显示所属列的小色点**：侧栏 DOM 里没有任何会话 id 属性（实测只有 class/role/aria-*；id 只在拖拽 payload 里），按标题匹配太脆，故不做。
-- **不与 `dsh-archived-chats` 联动**：那个插件自带 host 侧归档/回收站/保留策略与自己的路由，跨插件读它的内部状态很脆，且两套「真删」逻辑并存有风险；本看板的归档/垃圾桶只影响看板本身（面板底部有明确提示）。**唯一的例外是「清空」链路**：需要真删时会按需调用它的路由（0.2.0 起先做一次能力探测，不可用就不动手，见下）。
+- **不与 `dsh-archived-chats` 联动**：那个插件自带 host 侧归档/回收站/保留策略与自己的路由，跨插件读它的内部状态很脆，且两套「真删」逻辑并存有风险；本看板的归档/垃圾桶只影响看板本身（面板底部有明确提示）。**需要借它路由的例外只有「清空」链路**：需要真删时会按需调用它的路由（0.2.0 起先做一次能力探测，不可用就不动手，见下）。另外，上文「看板归档时同时从侧栏收起会话」（默认关）走的是**核心** `workspaces.archiveSession` / `unarchiveSession`，与这个插件的路由无关。
 - 垃圾桶的**清空 = 真删尝试**（两步确认）：链路是「核心 `workspaces.archiveSession` 归档 → `dsh-archived-chats` 的 `/delete-all` 移入它的回收站 → `/trash/purge` 物理删除」，并带上它要求的 CSRF 头 `x-dsh-archived-chats: 1`；每个会话的失败原因会显示在垃圾桶列里（例如 `persistence-response-invalid`）。**dsh 核心没有删除会话的 API**（`workspace/delete` 删的是工作区登记，不是会话），所以真删只能借这个插件。**0.2.0 起这条链路是"先探测后动手"**：不可用时立刻返回、一个会话都不归档，只把卡片移出看板并如实提示（`dsh-archived-chats@1.4.5` 在 0.2.0 上会被版本门禁跳过，探测必然不通过）。
 - **注意（0.1.5 时代的旧记录）**：实测本机装的 `dsh-archived-chats@1.1.0` 在 dsh 0.1.5 上**删不掉**：它校验会话头必须 `version === 2`，而 0.1.5 写的是 `version: 3`，因此其 `/delete-all` 对任何会话都回 `persistence-response-invalid`（它自己的回收站/删除大概也是坏的，建议更新或反馈给该插件作者）。在它能用之前，清空的效果是：**把卡片从看板移除（不再弹回待办/归档），会话本身仍在 dsh 里**；垃圾桶列头上的「恢复显示 N」可以把它们放回看板。
 - **撤销归档**：清空会先归档（归档 = 会话从侧栏消失），所以"归档了但没删掉"必须可逆 —— 看板把这类会话记在 `state.undo` 里，垃圾桶列头出现「撤销归档 N」，点击走 `/unarchive-all` 取消归档并把卡片放回看板；否则那些会话会一直不出现在侧栏。
+
+**归档时同时从侧栏收起会话**（设置 → 通用 → 界面定制，**默认关闭**）
+
+- 默认关闭时，看板的「归档」列只是**看板内的分诊状态**：移动卡片不碰任何会话，与既有行为完全一致（零 `archiveSession` / `unarchiveSession` 调用）。
+- 开启后，**手动**把卡片移入「归档」列（拖拽 / 卡片「⋯」菜单 / 批量移动 / 待办列「归档过期」）会同时调用**核心** `workspaces.archiveSession`，会话真的从侧栏（含工作区分组）消失；把卡片移出「归档」列时用核心 `workspaces.unarchiveSession` 恢复。**不依赖 `dsh-archived-chats`**（0.2.0 上它会被版本门禁跳过，且它管的是"真删"而不是看板分诊）。
+- “这是本功能收起的”标记就是看板状态里的**手动落列**（`entries[id].manual === true && column === "archived"`），随看板状态持久化，所以**刷新之后拖出「归档」列仍然能恢复**；核心取消归档对没被归档的 id 是幂等空操作，标记过时最多多一次无害调用。
+- **安全阀（只有手动动作会触发）**：**规则自动归类永不触发**——按窗口自动落进「归档」、跑完自动落到「完成」都只改看板状态，不碰会话。代码级断言在 `tools/board-logic-test.mjs`：自动落列/状态函数（`boardView` / `boardAutoColumn` / `boardMove` / `boardWatchRunning` / `boardPrune` …）里不许出现 `boardSidebarAction`、两个 owner 或 `archiveSession`，且这两个 owner **只能在 `BoardDialog` 的手动处理函数里被调用**。
+- **失败可见**：归档/恢复失败会写进看板标题栏的提示（`.enhc-board-note`），不静默吞掉——例如会话正在跑（Host 回 `workspace/session-active`；本功能**不会**替你 `stopActivity` 杀掉正在跑的回合）、核心 API 不可用、恢复失败；批量场景的提示形如「已从侧栏收起 N 个会话，拖出「归档」列即可恢复」。
+- 被收起的会话在侧栏的真实入口（已按产品文案核对）：侧栏「筛选会话」→「**全部对话（显示已归档）**」；只显示归档里那些选「**仅显示已归档**」。归档中的对话**取消归档之前打不开**（产品提示 `已归档对话暂时无法查看，请取消归档后查看`），所以「拖出『归档』列」才是主恢复路径。
+- ⚠️ **关闭开关不会自动放回已经收起的会话**（关闭 = 一次调用都不发，与旧行为完全一致）：要放回，请在开关还开着时把卡片移出「归档」列，或用上面那个侧栏入口手动取消归档；建议**先把卡片移出「归档」列，再关闭本开关**。
 
 ### 5. 注入控件与面板沿用 dsh 默认样式（不自带皮肤/容器外观）
 
@@ -396,7 +407,7 @@ curl -s -X POST http://127.0.0.1:3080/polish -H "content-type: application/json"
 ```bash
 node tools/board-logic-test.mjs      # 纯逻辑：落列/排序/剪枝/隐藏/撤销的不变量（CI 跑）
 node tools/board-ui-probe.mjs "$TOKEN" "$SESSION_ID" [/tmp/shot.png]   # 真界面 e2e（需活的 dsh web + Chrome + xvfb）
-node tools/board-archive-gate-test.mjs                        # B16 门禁回归网：清空不得先把会话归档（exit 0 = 33 条断言全过，组 0 + A–G）
+node tools/board-archive-gate-test.mjs                        # B16 门禁回归网：清空不得先把会话归档（exit 0 = 34 条断言全过，组 0 + A–G）
 node tools/board-archive-gate-test.mjs --mutate <name>|all    # 负控：exit 0 = 变异被检出（不检出 = 这张网形同虚设）；all 在 shipped guard 是 layout (a) 时额外用内存生成的 layout (b) 等价重构再跑一遍（是 layout (b) 则只跑 1 源并打 note）
 ```
 
@@ -404,9 +415,11 @@ node tools/board-archive-gate-test.mjs --mutate <name>|all    # 负控：exit 0 
 
 `board-archive-gate-test.mjs` 守的是**破坏性顺序**：真删会话要靠 `dsh-archived-chats` 的 `/delete-all` → `/trash/purge`，而 0.2.0-rc.2 的版本门禁会跳过 `archived-chats@1.4.5`，这两条路由只会 404/405 —— 这时"清空"只能降级成"把卡片移出看板"。一旦实现退化成"先归档、再发现删不掉"，会话就被移出侧栏且没有东西能把它放回来（用户却以为只是从看板移走了卡片）。所以它断言 `boardDeleteSessions` 的能力门禁必须排在 `workspaces.archiveSession` 循环**之前**：不可用时核心归档调用数必须为 **0**，唯一的请求是一次**空 id** 的能力探测，且探测结论被缓存为不可用。
 
-**33 条断言，分 0 + A–G 八组**：0 哨兵（切片确实来自当前 `lib/client.js`、归档路径仍在，`--mutate` 也跑）/ A 不可用时降级 / B 可用时走完整链路（core archive → `/delete-all` → `/trash/purge`）/ C purge 半途失败后核心 `workspaces.unarchiveSession` 能把会话收回（不留悬空归档）/ D 插件 `/unarchive-all` 成功时走插件且不碰 core，回 405 时仍能被 core 收回 / E 探测请求抛错时判 false 且不抛 / F 探测通过但 `/delete-all` 失败时如实上报并降级缓存 / **G 归属（整包范围，9 条）**。
+**34 条断言，分 0 + A–G 八组**：0 哨兵（切片确实来自当前 `lib/client.js`、归档路径仍在，`--mutate` 也跑）/ A 不可用时降级 / B 可用时走完整链路（core archive → `/delete-all` → `/trash/purge`）/ C purge 半途失败后核心 `workspaces.unarchiveSession` 能把会话收回（不留悬空归档）/ D 插件 `/unarchive-all` 成功时走插件且不碰 core，回 405 时仍能被 core 收回 / E 探测请求抛错时判 false 且不抛 / F 探测通过但 `/delete-all` 失败时如实上报并降级缓存 / **G 归属（整包范围，10 条）**。
 
-G 组是第二轮复查（F6/R1）加的，因为**只切函数的运行时断言挡不住"把归档调用搬到切片之外"**：把 `boardBridge.workspaces.archiveSession(id)` 循环塞进调用点 `purgeTrash`（它只是组件里的一个闭包，从来不在切片里）后，旧版仍是 18/18 全绿。验收规则现在是显式的：**任何把归档调用挪到门禁之前的等价改法都必须转红，包括挪出被切片函数的范围**。G 组因此在**整份 `lib/client.js`** 上断言（9 条）：`BOARD_ARCHIVE_BASE` 的**每一次引用**（声明处除外）都必须落在路由层的声明内（`boardDeleteSessions` / `boardProbeArchiveRoutes` / `boardRestoreArchived` / `boardRestoreSessions`，这份白名单是**显式写死**的，新加的 `boardArchive*` helper 不会被自动放行）；路由字面量 `/plugins/dsh-archived-chats` 全包只能出现一次且必须在常量声明处；`archiveSession` 的**每一处直接引用**都只能在被门禁保护的 `boardDeleteSessions` 内；`boardBridge` 不许在路由层之外做计算成员访问；并且在该函数内门禁必须存在、**文本上先于**归档循环、且是提前 return。
+G 组是第二轮复查（F6/R1）加的，因为**只切函数的运行时断言挡不住"把归档调用搬到切片之外"**：把 `boardBridge.workspaces.archiveSession(id)` 循环塞进调用点 `purgeTrash`（它只是组件里的一个闭包，从来不在切片里）后，旧版仍是 18/18 全绿。验收规则现在是显式的：**任何把归档调用挪到门禁之前的等价改法都必须转红，包括挪出被切片函数的范围**。G 组因此在**整份 `lib/client.js`** 上断言（10 条）：`BOARD_ARCHIVE_BASE` 的**每一次引用**（声明处除外）都必须落在路由层的声明内（`boardDeleteSessions` / `boardProbeArchiveRoutes` / `boardRestoreArchived` / `boardRestoreSessions`，这份白名单是**显式写死**的，新加的 `boardArchive*` helper 不会被自动放行）；路由字面量 `/plugins/dsh-archived-chats` 全包只能出现一次且必须在常量声明处；`boardBridge` 不许在路由层之外做计算成员访问；并且在该函数内门禁必须存在、**文本上先于**归档循环、且是提前 return。
+
+`archiveSession` 的归属断言是**显式两个 owner**（2026-09，为「看板归档时同时从侧栏收起会话」扩过一次）：被门禁保护的 `boardDeleteSessions`，以及那个开关的 owner `boardArchiveSessions`（默认关；只由 `BoardDialog` 的手动移动处理函数经 `boardSidebarAction` 调用，规则自动归类走不到）。**第三个**声明只要写出 `archiveSession` 就转红——这正是 `helper` / `move` 等负控仍在抓的东西；同时 `boardArchiveSessions` **不在** `BOARD_ARCHIVE_BASE` 的路由白名单里，所以它也不能借归档插件的路由。
 
 **已知残余局限（刻意不追）**：以上都是**文本级**归属断言，能拦住所有通过 `BOARD_ARCHIVE_BASE` 常量或 `archiveSession` 这个名字的等价破坏（包括"复用常量手搓路由"与"新 helper + 复用常量"这两种曾经的逃逸），但**刻意拼写变形**（例如 `workspaces["archive" + "Session"](id)`）不在保证范围内——静态文本匹配追不出所有变形，追下去只会把测试变成脆弱的字符串迷宫，而且这个项目已经因为"锚点耦合 `lib/client.js` 内部结构"吃过一次亏。风险可接受的理由：这类写法在实践中只会出现在刻意规避审查的场景（常量就摆在同一个文件里，正常改法都会用它），代码评审可见；运行期网络（A–F 组）仍然保证**被切片的 owner** 在链路不可用时一个会话都不归档。
 
