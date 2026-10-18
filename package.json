@@ -1,6 +1,6 @@
 {
   "name": "dsh-enhance-tool",
-  "version": "0.15.0",
+  "version": "0.15.1",
   "private": false,
   "type": "module",
   "main": "lib/index.js",
@@ -13,8 +13,11 @@
     },
     "./package.json": "./package.json"
   },
+  "engines": {
+    "dsh": ">=0.2.1-rc.1 <0.3.0"
+  },
   "peerDependencies": {
-    "@deepseek-ai/dsh": "^0.2.0-rc.2"
+    "@deepseek-ai/dsh": "^0.2.1-rc.1"
   },
   "dsh": {
     "bundle": {
