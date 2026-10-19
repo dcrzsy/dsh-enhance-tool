@@ -1,6 +1,6 @@
 # dsh-enhance-tool
 
-DeepSeek Harness (`dsh`) web 界面增强插件 — 润色、提示词库、预测回复、消息工具条常显、工具调用耗时、宽度/字号/侧栏缩放。
+DeepSeek Harness (`dsh`) web 界面增强插件 — 润色、提示词库、预测回复、消息工具条常显、工具调用耗时、宽度/字号/侧栏缩放、会话分享为图片。
 
 - **安装形态**：100% 插件注入（slot / shell.overlay / settings / sessionTitle 官方机制）+ 一个**随包发布的声明式挂载层** `cordis.patch.yml`（`package.json` 的 `dsh.bundle.patch`：`insert ui-enhancer` + 禁用官方 `session-title-llm`）。它不改 dsh 官方 bundle 源文件、也不手改 profile 的 patch 配置（旧文档「零 bundle 补丁」的说法不准确，已删）
 - **兼容版本**：`dsh ^0.2.0-rc.2`（以 `package.json` 的 `peerDependencies` 为准；已实测 `0.2.0-rc.2`）。此前的实测版本为 `0.1.0-rc.7` / `0.1.1-rc.2` / `0.1.2-rc.1` / `0.1.5-rc.2`——**0.1.x 已不在当前声明范围内**（dsh 0.2.0 起会按 `peerDependencies` 跳过版本不匹配的 bundle），0.1.x 用户请继续使用 `v0.13.1`
@@ -198,7 +198,25 @@ kill -INT <pid>
 - 被收起的会话在侧栏的真实入口（已按产品文案核对）：侧栏「筛选会话」→「**全部对话（显示已归档）**」；只显示归档里那些选「**仅显示已归档**」。归档中的对话**取消归档之前打不开**（产品提示 `已归档对话暂时无法查看，请取消归档后查看`），所以「拖出『归档』列」才是主恢复路径。
 - ⚠️ **关闭开关不会自动放回已经收起的会话**（关闭 = 一次调用都不发，与旧行为完全一致）：要放回，请在开关还开着时把卡片移出「归档」列，或用上面那个侧栏入口手动取消归档；建议**先把卡片移出「归档」列，再关闭本开关**。
 
-### 5. 注入控件与面板沿用 dsh 默认样式（不自带皮肤/容器外观）
+### 5. 会话分享（图片）
+
+会话头部最右侧的「分享」按钮进入**选择模式**，把选中的轮次一键生成图片并写入剪贴板：
+
+- **选择粒度是内容块**：每条用户消息、每段助手正文各自一个勾选；想「去掉」某段内容，只要取消对应勾选。思考过程、工具调用、复制 / 分叉等交互控件不会出现。
+- 进入后每段内容上方出现勾选胶囊（默认全选）：用户块显示 `你 · 时间 · 预览`，助手块显示 `AI · 预览`，点一下切换；底部浮动条显示「已选 N / M 段」并支持 全选 / 清空 / 复制图片 / 退出（`Esc` 也可退出）。
+- **复制图片**：把所选轮次渲染成一张 PNG 后**直接写入剪贴板**；成功时退出选择模式并提示「已复制图片到剪贴板」。
+- 图片内容：会话标题、轮次数与时间范围、只渲染勾选的内容块（按轮次分组、保持原 DOM 顺序）、未选轮次的「省略 N 轮」分隔、页脚；表格 / 代码块 / 列表 / 引用 / 内联图片按页面样式保留。
+- **失败可恢复**：剪贴板被浏览器拒绝（未聚焦、权限、非安全上下文）时弹出预览对话框，可**重试复制**或**下载 PNG**，不会丢图。
+- **尺寸兜底**：宽度 760 CSS px、默认 2x 输出；内容过长自动降采样，超过画布上限（16000px）时提示减少内容，不生成半张图；一次最多 120 段内容。
+- **长图不截断**：页脚后放一条整宽结束标记，按它在 SVG 栅格里的实际位置裁剪；SVG 中表格 / 容器布局比活 DOM 更高时自动扩大渲染视口重试，底部内容与页脚不会丢。
+- **主题跟随**：图片颜色取自当前页面主题变量，浅色 / 深色主题下都与界面一致。
+- 设置 → 通用 → **会话分享（图片）** 可隐藏头部按钮（默认显示）。
+
+实现要点：图片不是截图，而是**克隆产品 DOM + 回放页面 CSS**，通过 SVG `foreignObject` 光栅化到 Canvas —— 表格、代码块、语法高亮直接沿用产品样式，不需要 Markdown 渲染器或新依赖。SVG 图片是不透明源，因此复制 CSS 前会清掉所有非 `data:` URL（否则 Canvas 被污染、`toBlob()` 抛错），DOM 中的图片会转成 `data:` URL 内联，跨域 / 不支持的类型跳过；`ClipboardItem` 在点击的瞬时激活内创建（先传 `Promise<Blob>`，随后再渲染），避免长渲染丢掉用户手势。
+
+已知边界：用户消息的**附件卡片**（文件 / 图片缩略图）不进入图片，只分享消息气泡文本；KaTeX 数学公式使用系统字体回退（不内联 KaTeX 字体），复杂公式可能与页面略有差异；剪贴板只写 PNG，浏览器不支持 `ClipboardItem` 时走下载兜底。
+
+### 6. 注入控件与面板沿用 dsh 默认样式（不自带皮肤/容器外观）
 
 **按钮**
 - composer 工具栏的「提示词库 / 润色」按钮、建议条候选按钮，挂载后**从活的 DOM 读取相邻产品控件的类名并复制到自己身上**（`adoptProductButtonStyle`）：工具按钮取同排的 `指令 / 添加附件`，建议条取 composer 里的文字 pill（如「完全权限」）。外观与产品逐像素一致，产品改样式自动跟随，类名是**从 DOM 读的、不写死哈希**。
@@ -215,7 +233,7 @@ kill -INT <pid>
 - 弹层/对话框层级：管理对话框 `z-index: 1200`，高于润色/提示词库弹层（1100），避免弹窗叠在对话框之上。
 - 新增类名必须同时加进 `PromptTools_module_css_default` 映射表（`lib/client.js` 里那张手写表），否则 `className` 是 `undefined`、样式静默不生效。
 
-### 6. UI 修复
+### 7. UI 修复
 
 - **hero 菜单 overlay 修复**：下拉菜单覆盖输入框时自动限高滚动（不影响模型选择等短菜单）
 
@@ -359,7 +377,7 @@ bash install.sh --check        # 期望 exit 0，末行 "nothing was installed (
 
 # 1. 插件会被加载（全部只读，不碰 profile）
 grep -n 'dsh-enhance-tool' ~/.dsh/profiles/web/package.json      # dsh.profile.bundles 里有它
-node -e "console.log(require(process.env.HOME+'/.dsh/profiles/web/node_modules/dsh-enhance-tool/package.json').version)"   # 期望 0.14.0
+node -e "console.log(require(process.env.HOME+'/.dsh/profiles/web/node_modules/dsh-enhance-tool/package.json').version)"   # 期望 0.17.0
 grep -c 'skipping profile bundle "dsh-enhance-tool"' <启动日志>   # 期望 0，即没被版本门禁跳过
 # 注意：别用 `grep "patched prepareCall"` 判断——0.2.0 的 LlmAdapter 基类已自带 prepareCall，
 #       补丁必然跳过，那条日志不会出现（此时插件仍可能完全正常）。
@@ -374,7 +392,8 @@ curl -s -X POST http://127.0.0.1:3080/polish -H "content-type: application/json"
 # 需要认证时：curl -s -c /tmp/jar "http://127.0.0.1:3080/?token=<启动日志里的 token>"，之后请求加 -b /tmp/jar
 
 # 3. 浏览器（Ctrl+Shift+R 硬刷新）：composer 工具栏出现 提示词库 / 润色 按钮；消息右侧常显时间与工具耗时；
-#    打开有消息的会话后，输入框上方出现建议条（0.2.0 上这三项依赖本轮 D1/D2/D3 修复）
+#    打开有消息的会话后，输入框上方出现建议条（0.2.0 上这三项依赖本轮 D1/D2/D3 修复）；
+#    会话头部最右侧出现「分享」按钮：进入选择模式 → 点「复制图片」→ 剪贴板里应是一张 PNG
 ```
 
 ---
@@ -392,8 +411,8 @@ curl -s -X POST http://127.0.0.1:3080/polish -H "content-type: application/json"
 │   ├── client.js         # client 侧：全部 UI 组件 + 注入样式（构建产物）
 │   └── polish-routes.js  # /polish /suggest /prompt-library 路由
 ├── install.sh            # 安装辅助：默认 pnpm 路径；--copy / --check / --uninstall
-├── tools/                # 测试与工具（见下）：board-logic-test / board-ui-probe / board-archive-gate-test / css-diff.py
-├── .github/workflows/    # CI：语法检查 + 两个回归网（含负控）
+├── tools/                # 测试与工具（见下）：board-logic-test / board-ui-probe / board-archive-gate-test / share-logic-test / css-diff.py
+├── .github/workflows/    # CI：语法检查 + 三个回归网（含负控）
 ├── LICENSE               # MIT
 └── reports/              # 兼容性审计与复验报告（本机证据，package.json 的 files 不含它）
 ```
@@ -401,6 +420,14 @@ curl -s -X POST http://127.0.0.1:3080/polish -H "content-type: application/json"
 `package.json` 的 `files` 只发布 `lib/` 与 `cordis.patch.yml`，`tools/`、`reports/`、`install.sh` 都不进 tarball。
 
 `client.js` 是对 dsh 官方 client bundle 的**注入产物**（通过 slot 注入 + 运行时 CSS，不修改 bundle 源文件）。重注入脚本与本地开发流程见内部 `dsh-patches/`（未随仓库发布）。
+
+### 会话分享的回归网
+
+```bash
+node tools/share-logic-test.mjs      # 45 条断言：轮次归组 / 内容块拆分 / 时间回退 / URL 清洗 / 结束标记裁剪 / 结构锚点（CI 跑）
+```
+
+`share-logic-test.mjs` 从 `lib/client.js` 里抠出 `shareGroupTurns`（把 flow 行归成轮次）、`shareBlocksFromGroups`（把轮次拆成可勾选的内容块，并保持用户消息 / 助手正文的 DOM 顺序）和 `shareCleanUrlText`（把 CSS / style 里的外部 URL 抹成 `none`，只留 `data:`），在沙箱里断言最容易静默退化的规则：**助手一轮里的所有正文段都要成为独立内容块**（不能只取最后一段，否则无法逐段「去掉」且会丢内容）、块顺序与角色正确、缺少锚点时 key 仍稳定，以及**任何外部 URL 都不得进入 SVG**（漏一个就会污染 Canvas、`toBlob()` 直接抛错）。另外锁定结构锚点：utilities slot 注册、`ClipboardItem` + `Promise<Blob>` 交接、`foreignObject` 光栅化、画布上限、默认开启的设置项、会话重挂载不退出分享模式、120 段上限、**勾选态不会画进图片**（克隆时会剥掉 `enhc-share-picked` / `enhc-share-excluded`，否则选中框会被烘焙成图片的一部分），以及**长图按结束标记裁剪**（`shareFindSentinel` / `shareCropCanvas` + 放大的 SVG 视口，防止底部页脚与最后几行被截断）。
 
 ### 看板的三个测试工具
 

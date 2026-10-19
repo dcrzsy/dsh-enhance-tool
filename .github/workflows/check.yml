@@ -21,10 +21,13 @@ jobs:
           node --check tools/board-logic-test.mjs
           node --check tools/board-ui-probe.mjs
           node --check tools/board-archive-gate-test.mjs
+          node --check tools/share-logic-test.mjs
       - name: Verify install.sh syntax
         run: bash -n install.sh
       - name: Verify board logic invariants
         run: node tools/board-logic-test.mjs
+      - name: Verify the session-share selection invariants
+        run: node tools/share-logic-test.mjs
       - name: Verify the B16 destructive-order regression net
         run: node tools/board-archive-gate-test.mjs
       - name: Verify the B16 net is not vacuous (negative controls)
