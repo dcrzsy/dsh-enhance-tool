@@ -98,6 +98,7 @@ kill -INT <pid>
 | **用户消息自适应宽度** | `fit-content + max-width:100%`：内容少小气泡、内容多撑满整列 |
 | **用户长消息折叠** | 渲染行 > 5 行自动折叠，点击展开/收起（含历史消息） |
 | **任务看板（通用面板）** | 会话头部「轨迹」右侧的「看板」页签式入口：待办 / 进行中 / 完成 / 搁置 / 归档 / 垃圾桶六列；卡片默认是会话，**「待办」列可新建自由待办卡，点一下就建会话并开始执行**；支持拖拽跨列与列内排序、批量选择、列折叠、搜索/工作区过滤、自动归类 | 设置 → 通用 → 通用面板 |
+| **上下文面板** | 「轨迹」和「看板」之间的「上下文」入口：上下文用量（% / tokens）+ 组成（系统提示词 / 工具定义 / 对话消息）+ 两个页签（上下文内容 / 单独查看系统提示词），实时跟随会话与压缩结果；「压缩」直接发 `/compact` 并回报真实结果，「编辑上下文」可改会话内容并作为新消息发回 | 设置 → 通用 → 通用面板（与看板共用显隐开关） |
 | **看板归档时同时从侧栏收起会话** | **默认关闭**。开启后只有**手动**把卡片移入「归档」列（拖拽 / ⋯菜单 / 批量 / 「归档过期」）才调用核心 `workspaces.archiveSession` 把会话从侧栏收起，移出「归档」列用核心 `unarchiveSession` 恢复；**规则自动归类永不触发**；失败写进看板提示栏 | 设置 → 通用 → 看板归档时同时从侧栏收起会话 |
 | **消息工具条常显** | 每条消息常显发送时间与复制 / 分叉 / 调用量 / 耗时按钮（当天 `HH:mm`，跨天带日期）——产品默认需悬浮才显示 | 设置 → 通用 → 消息工具条常显 |
 | **工具调用耗时** | 每条工具调用与子工具（PTC 子调用）右侧常显耗时（`296ms` / `2分02秒`）；**进行中的调用实时计时**（蓝色脉动，如 `35s…`），完成后自动定型；悬浮显示开始 / 结束时刻 | 设置 → 通用 → 工具调用耗时 |
@@ -203,7 +204,27 @@ kill -INT <pid>
 - 被收起的会话在侧栏的真实入口（已按产品文案核对）：侧栏「筛选会话」→「**全部对话（显示已归档）**」；只显示归档里那些选「**仅显示已归档**」。归档中的对话**取消归档之前打不开**（产品提示 `已归档对话暂时无法查看，请取消归档后查看`），所以「拖出『归档』列」才是主恢复路径。
 - ⚠️ **关闭开关不会自动放回已经收起的会话**（关闭 = 一次调用都不发，与旧行为完全一致）：要放回，请在开关还开着时把卡片移出「归档」列，或用上面那个侧栏入口手动取消归档；建议**先把卡片移出「归档」列，再关闭本开关**。
 
-### 5. 会话分享（图片）
+### 5. 上下文面板
+
+**入口**：「轨迹」与「看板」之间的 pill「上下文」（与看板入口同一套 token、同一显隐开关）。会话未打开时头部没有 tab 条，入口也就不出现。
+
+**面板**（点入口打开，`Esc` / 遮罩 / ✕ 关闭）：
+- 顶部：会话标题 + **「上下文已用 N%」** + `~已用 / 窗口`（如 `~261k / 1.0M`）；
+- 组成行：**系统提示词 / 工具定义 / 对话消息** 各自的 token 数（色点区分）；「系统提示词」整行可点，直接跳到系统提示词页签；
+- 两个页签：**上下文内容**（默认）与 **系统提示词**；
+- **上下文内容**：用户消息、助手回复与压缩摘要，`<system-reminder>` 这类注入消息过滤掉；**压缩后按当前可见 surface 显示**——被压缩替换掉的旧消息隐藏，摘要落在它实际替换的位置上（会话日志与「轨迹」仍保留完整历史）；
+- **系统提示词**：单独、完整地显示系统提示（不混在对话内容里，最多 200k 字符）。长会话的系统提示在日志最开头、尾页窗口里通常没有，第一次切到这个页签时会自动向前翻页（每轮最多 12 页）直到找到；找不到时显示「加载更早历史」按钮继续，翻到会话开头仍没有则如实提示；
+- 底部两个动作。
+
+**实时刷新**：面板打开期间订阅会话的 `eventSource` 与 `contextPressure` / `contextBreakdown` 两个投影（160ms 合并），所以对话在跑、或压缩完成时，百分比、组成和内容都会自动更新，不需要关掉重开。
+
+**「压缩」**：直接调用产品的宿主命令 `binding.session.command("/compact")`（agent 忙时宿主会拒绝，面板底部如实显示）。发起后面板进入「压缩中…」，并按会话日志里的 `command/run` + `command/done` 等待真实结果：成功显示「压缩完成，上下文已更新」；没有可压缩历史时显示「没有可压缩的历史」（这种成功不会产生任何 compaction 事件）；失败显示宿主返回的错误文本；3 分钟仍无结果则恢复按钮并提示结果会出现在对话里。压缩摘要同时以 flow node 出现在对话里。
+
+**「编辑上下文」**：把当前**会话内容**（系统提示词不参与）渲染成可编辑文本（`[你] / [助手] / [压缩摘要]` 前缀），改完点**「发送」**把文本作为新消息发进会话——它**真正进入上下文**；要**替换**旧历史而不是追加，再点一次「压缩」。
+
+**数据来源与坑（0.2.0 实测）**：用量/组成从**会话自己的投影 store** 读（`binding.session.projections.faceOf("contextPressure" | "contextBreakdown").getSnapshot()`）——列表 summary 的 `projectionValues` 只带列表种子（title/turnOutline/todos/inbox 等），拿不到这两个；`contextPressure` 给的是 `projectedTokens / pressureTokens / contextWindow`（没有 `surfaceTokens`），`contextBreakdown` 的值直接是 `{systemTokens, toolsTokens, messageTokens}`（没有再包一层 `breakdown`）——两处都做了兜底。内容列表覆盖事件窗口（最多显示 80 条），「系统提示词」页签最多显示 8 条；压缩替换由 `compaction/summary.shadowedSeqs` 与替换消息的 `surfaceOp` 共同确定，面板按 **surface 位置**（不是 seq 顺序）还原，所以摘要会出现在它实际所在的位置。
+
+### 6. 会话分享（图片）
 
 会话头部最右侧的「分享」按钮进入**选择模式**，把选中的轮次一键生成图片并写入剪贴板：
 
@@ -221,7 +242,7 @@ kill -INT <pid>
 
 已知边界：用户消息的**附件卡片**（文件 / 图片缩略图）不进入图片，只分享消息气泡文本；KaTeX 数学公式使用系统字体回退（不内联 KaTeX 字体），复杂公式可能与页面略有差异；剪贴板只写 PNG，浏览器不支持 `ClipboardItem` 时走下载兜底。
 
-### 6. 注入控件与面板沿用 dsh 默认样式（不自带皮肤/容器外观）
+### 7. 注入控件与面板沿用 dsh 默认样式（不自带皮肤/容器外观）
 
 **按钮**
 - composer 工具栏的「提示词库 / 润色」按钮、建议条候选按钮，挂载后**从活的 DOM 读取相邻产品控件的类名并复制到自己身上**（`adoptProductButtonStyle`）：工具按钮取同排的 `指令 / 添加附件`，建议条取 composer 里的文字 pill（如「完全权限」）。外观与产品逐像素一致，产品改样式自动跟随，类名是**从 DOM 读的、不写死哈希**。
@@ -238,7 +259,7 @@ kill -INT <pid>
 - 弹层/对话框层级：管理对话框 `z-index: 1200`，高于润色/提示词库弹层（1100），避免弹窗叠在对话框之上。
 - 新增类名必须同时加进 `PromptTools_module_css_default` 映射表（`lib/client.js` 里那张手写表），否则 `className` 是 `undefined`、样式静默不生效。
 
-### 7. UI 修复
+### 8. UI 修复
 
 - **hero 菜单 overlay 修复**：下拉菜单覆盖输入框时自动限高滚动（不影响模型选择等短菜单）
 
@@ -382,7 +403,7 @@ bash install.sh --check        # 期望 exit 0，末行 "nothing was installed (
 
 # 1. 插件会被加载（全部只读，不碰 profile）
 grep -n 'dsh-enhance-tool' ~/.dsh/profiles/web/package.json      # dsh.profile.bundles 里有它
-node -e "console.log(require(process.env.HOME+'/.dsh/profiles/web/node_modules/dsh-enhance-tool/package.json').version)"   # 期望 0.18.0
+node -e "console.log(require(process.env.HOME+'/.dsh/profiles/web/node_modules/dsh-enhance-tool/package.json').version)"   # 期望 0.20.0
 grep -c 'skipping profile bundle "dsh-enhance-tool"' <启动日志>   # 期望 0，即没被版本门禁跳过
 # 注意：别用 `grep "patched prepareCall"` 判断——0.2.0 的 LlmAdapter 基类已自带 prepareCall，
 #       补丁必然跳过，那条日志不会出现（此时插件仍可能完全正常）。
@@ -441,9 +462,12 @@ node tools/board-logic-test.mjs      # 纯逻辑：落列/排序/剪枝/隐藏/�
 node tools/board-ui-probe.mjs "$TOKEN" "$SESSION_ID" [/tmp/shot.png]   # 真界面 e2e（需活的 dsh web + Chrome + xvfb）
 node tools/board-archive-gate-test.mjs                        # B16 门禁回归网：清空不得先把会话归档（exit 0 = 39 条断言全过，组 0 + A–G）
 node tools/board-archive-gate-test.mjs --mutate <name>|all    # 负控：exit 0 = 变异被检出（不检出 = 这张网形同虚设）；all 在 shipped guard 是 layout (a) 时额外用内存生成的 layout (b) 等价重构再跑一遍（是 layout (b) 则只跑 1 源并打 note）
+node tools/context-logic-test.mjs                            # 上下文面板纯逻辑：系统提示拆分、压缩 shadow/surface 位置、注入过滤、截断上限、/compact 结果配对（exit 0 = 26 条断言）
 ```
 
 `board-logic-test.mjs` 从 `lib/client.js` 里把纯函数抠出来跑沙箱断言，不需要浏览器。`board-ui-probe.mjs` 用 puppeteer 驱动真实面板（拖拽、菜单、批量、折叠、搜索、新建/改名/勾选/删除自由待办卡、清空→撤销归档、刷新持久化）；**默认不碰会话**，加 `BOARD_PROBE_RUN=1` 才会真的走一遍"待办 → 建会话执行"（会新建一个会话，脚本会打印 id 方便清理），**会动真会话**，但结束时会把动过的都还原，并断言没有残留归档（会话被归档就会从侧栏消失，所以这个收尾很重要）。
+
+`context-logic-test.mjs` 同样从 `lib/client.js` 抠出 `contextItems` / `contextCompactCommand` 跑沙箱：系统提示与对话内容分栏、`<system-reminder>` 注入过滤、`compaction/summary.shadowedSeqs` 隐藏被压缩历史、替换消息的 `surfaceOp` 按位置插入（不是按 seq 追加）、连续压缩与系统提示重写、截断上限，以及 `/compact` 的 `command/run` ↔ `command/done` 配对（含 "No compactable history yet." 这种没有压缩事件的成功）。
 
 `board-archive-gate-test.mjs` 守的是**破坏性顺序**：真删会话要靠 `dsh-archived-chats` 的 `/delete-all` → `/trash/purge`，而 0.2.0-rc.2 的版本门禁会跳过 `archived-chats@1.4.5`，这两条路由只会 404/405 —— 这时"清空"只能降级成"把卡片移出看板"。一旦实现退化成"先归档、再发现删不掉"，会话就被移出侧栏且没有东西能把它放回来（用户却以为只是从看板移走了卡片）。所以它断言 `boardDeleteSessions` 的能力门禁必须排在 `workspaces.archiveSession` 循环**之前**：不可用时核心归档调用数必须为 **0**，唯一的请求是一次**空 id** 的能力探测，且探测结论被缓存为不可用。
 
