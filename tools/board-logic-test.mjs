@@ -103,6 +103,7 @@ const FUNCS = [
   'boardDeleteItem',
   'boardHide',
   'boardUnhide',
+  'boardDrop',
   'boardUndoAdd',
   'boardUndoDrop',
   'boardWorkspace',
@@ -139,6 +140,7 @@ const {
   boardDeleteItem,
   boardHide,
   boardUnhide,
+  boardDrop,
   boardUndoAdd,
   boardUndoDrop,
   boardWorkspace,
@@ -181,6 +183,8 @@ check('unknown column is dropped', boardParse(JSON.stringify({ entries: { a: { c
 check('bad order is coerced', boardParse(JSON.stringify({ entries: { a: { column: 'doing', order: 'x' } } })).entries.a.order, 0);
 check('serialize round-trips', boardParse(boardSerialize(boardMove(boardEmptyState(), 'a', 'doing', -1, true))).entries.a.column, 'doing');
 check('collapsed keeps known columns only', boardParse(JSON.stringify({ collapsed: ['todo', 'zzz'] })).collapsed, ['todo']);
+const foldedState = { ...boardEmptyState(), folded: { 'archived|/w/alpha': true, 'done|/w/x': false } };
+check('group folding survives the storage round-trip', boardParse(boardSerialize(foldedState)).folded, { 'archived|/w/alpha': true, 'done|/w/x': false });
 
 // 2 — auto placement (driven by the Session projections the host exposes)
 const recent = session('recent');
@@ -286,6 +290,23 @@ check('a restored session leaves the undo list', boardUndoDrop(undoState, ['u1']
 check('undo is idempotent', boardUndoAdd(undoState, ['u1']).undo, ['u1']);
 check('undo keeps ids of sessions that still exist', boardPrune(undoState, ['u1'], now).undo, ['u1']);
 check('undo drops ids of sessions that are gone and not hidden', boardPrune(boardUndoAdd(boardEmptyState(), ['u2']), [], now).undo, []);
+
+// 6c-bis — a REAL delete is irreversible: the card must not stay restorable anywhere
+const pair = boardMove(boardMove(boardEmptyState(), 'gone', 'trash', -1, true), 'kept', 'trash', -1, true);
+const restorable = boardUndoAdd(boardHide(pair, ['gone', 'kept']), ['gone', 'kept']);
+const dropped = boardDrop(restorable, ['gone']);
+check('a really deleted session leaves no board entry', Object.keys(dropped.entries), []);
+check('a really deleted session is tombstoned', dropped.gone, ['gone']);
+check('a really deleted session is not offered by 恢复显示', dropped.hidden, ['kept']);
+check('a really deleted session is not offered by 撤销归档', dropped.undo, ['kept']);
+check('a merely hidden session stays restorable', boardUnhide(dropped, ['kept']).hidden, []);
+// a stale client session list must not revive the card right after the delete
+const staleList = listOf([session('gone'), session('kept')]);
+check('a tombstoned session never renders, even while the list still names it', boardView(boardDrop(boardEmptyState(), ['gone']), staleList, now, {}).total, 1);
+check('prune drops the tombstone once the list stops naming the session', boardPrune(boardDrop(boardEmptyState(), ['gone']), [], now).gone, []);
+check('the tombstone survives the storage round-trip', boardParse(boardSerialize(boardDrop(boardEmptyState(), ['gone']))).gone, ['gone']);
+check('the trash purge drops really deleted ids instead of hiding them',
+  /boardDrop\(boardUndoAdd\(boardHide\(next, survivors\), undoable\), result\.deleted\)/.test(source), true);
 
 // 6d — free-form to-do cards (待办 新建), which have no session behind them
 const itemList = listOf([session('s1'), session('s2')]);
@@ -413,7 +434,7 @@ const renderColumn = (column, cards, options = {}) => runWithScope(`return (${co
   BoardAddItem: 'BoardAddItem',
   ptL: (zh) => zh,
   view: { columns: { [column.key]: cards } },
-  state: { collapsed: options.collapsed === true ? [column.key] : [] },
+  state: { collapsed: options.collapsed === true ? [column.key] : [], folded: options.folded ?? {} },
   ui: { all: options.all === true, query: options.query ?? '', select: options.select === true, over: null, more: options.more ?? {}, picked: [], dragged: null, menuFor: null, confirmClear: false },
   now,
   BOARD_COLUMN_PAGE,
@@ -435,7 +456,11 @@ const planNodesOf = (element) => {
   if (body === null || body === void 0) return [];
   return (Array.isArray(body) ? body : [body]).filter((node) => node !== null && node !== void 0).map((node) => {
     const className = String(node?.props?.className ?? '');
-    if (className.includes('enhc-board-group-head')) return { kind: 'head', label: String(node.props.children[0]?.props?.children ?? '') };
+    if (className.includes('enhc-board-group-head')) {
+      const kids = Array.isArray(node.props.children) ? node.props.children : [node.props.children];
+      const name = kids.find((kid) => kid && kid.props && String(kid.props.className ?? '').includes('enhc-board-group-name'));
+      return { kind: 'head', label: String(name?.props?.children ?? ''), folded: node.props['aria-expanded'] === 'false' };
+    }
     if (className === 'enhc-board-more') return { kind: 'tail', text: String(node.props.children ?? '') };
     if (node.type === 'BoardCard' || node.type === 'BoardItemCard') return { kind: 'card', id: node.props.card.id };
     if (node.type === 'BoardAddItem') return { kind: 'add' };
@@ -481,7 +506,8 @@ for (let i = 0; i < 23; i += 1) {
   if (i < 2) bigGroupCards.push(groupCard(`d${i}`, '/w/delta'));
 }
 const archivedColumn = BOARD_COLUMNS.find((column) => column.key === 'archived');
-const bigColumn = renderColumn(archivedColumn, bigGroupCards, {});
+const expandedGroups = Object.fromEntries(['alpha', 'gamma', 'beta', 'delta'].map((name) => [`archived|/w/${name}`, false]));
+const bigColumn = renderColumn(archivedColumn, bigGroupCards, { folded: expandedGroups });
 check('group order follows first appearance', sectionShapeOf(bigColumn).map((shape) => shape.split(':')[0]), ['alpha', 'gamma', 'beta', 'delta']);
 check('each group renders its own page and its own tail', sectionShapeOf(bigColumn), ['alpha:20c,1tail', 'gamma:20c,1tail', 'beta:3c', 'delta:2c']);
 check('a group section is cards and then at most one tail', brokenShapesOf(bigColumn), []);
@@ -490,9 +516,22 @@ check('every tail reports its own group\'s remainder', tailRemaindersOf(bigColum
 check('a tail carries the group in its title', planNodesOf(bigColumn).filter((node) => node.kind === 'tail').length, 2);
 
 // a group that was paged once keeps its own budget (ui.more is keyed per column+workspace)
-const pagedColumn = renderColumn(archivedColumn, bigGroupCards, { more: { 'archived|/w/alpha': 20 } });
+const pagedColumn = renderColumn(archivedColumn, bigGroupCards, { more: { 'archived|/w/alpha': 20 }, folded: expandedGroups });
 check('a paged group shows its next page and drops its tail', sectionShapeOf(pagedColumn), ['alpha:23c', 'gamma:20c,1tail', 'beta:3c', 'delta:2c']);
 check('paging one group leaves the other groups alone', sectionShapeOf(pagedColumn).length, 4);
+
+// 归档's long groups start folded: that column is where the rules dump everything older
+// than the window, so its default view is one header per workspace instead of a wall.
+const foldedArchive = renderColumn(archivedColumn, bigGroupCards, {});
+check('long archive groups start folded', sectionShapeOf(foldedArchive), ['alpha:0c', 'gamma:0c', 'beta:3c', 'delta:2c']);
+check('a folded group keeps its count and shows no tail', planNodesOf(foldedArchive).filter((node) => node.kind === 'tail').length, 0);
+check('folded heads report aria-expanded=false', planNodesOf(foldedArchive).filter((node) => node.kind === 'head' && node.folded).map((node) => node.label), ['alpha', 'gamma']);
+const openedOne = renderColumn(archivedColumn, bigGroupCards, { folded: { 'archived|/w/alpha': false } });
+check('opening one group leaves the others folded', sectionShapeOf(openedOne), ['alpha:20c,1tail', 'gamma:0c', 'beta:3c', 'delta:2c']);
+check('an opened group reports aria-expanded=true', planNodesOf(openedOne).find((node) => node.kind === 'head' && node.label === 'alpha').folded, false);
+const doneColumn = BOARD_COLUMNS.find((column) => column.key === 'done');
+const doneGrouped = renderColumn(doneColumn, bigGroupCards, {});
+check('only the archive column folds by default', sectionShapeOf(doneGrouped), ['alpha:20c,1tail', 'gamma:20c,1tail', 'beta:3c', 'delta:2c']);
 
 // short column, single workspace, search mode and batch mode keep the plain paginated path
 const shortColumn = renderColumn(archivedColumn, [groupCard('a1', '/w/a'), groupCard('b1', '/w/b')], {});

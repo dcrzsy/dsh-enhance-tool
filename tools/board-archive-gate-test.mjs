@@ -498,19 +498,19 @@ function runSuite(src, options = {}) {
     }
   };
 
-  const workspacesStub = () => ({
+  const workspacesStub = (archived = []) => ({
     archiveSession: async (id) => {
       calls.push({ op: 'core.archive', id });
       if (id === 'refused') throw new Error('archive refused');
     },
     unarchiveSession: async (id) => { calls.push({ op: 'core.unarchive', id }); },
-    list: { getSnapshot: () => ({ archivedSessionIds: [] }) },
+    list: { getSnapshot: () => ({ archivedSessionIds: archived }) },
   });
   /** Fresh sandbox state between scenarios: cache cleared, calls cleared, stub in place. */
-  const reset = () => {
+  const reset = (archived = []) => {
     calls.length = 0;
     api.setProbe(null);
-    bridge.workspaces = workspacesStub();
+    bridge.workspaces = workspacesStub(archived);
   };
   const archivedThroughCore = () => calls.filter((call) => call.op === 'core.archive').length;
   const record = (url, init) => `${init.method} ${url.replace('http://stub', '')} ${init.body}`;
@@ -581,7 +581,7 @@ function runSuite(src, options = {}) {
       const out = await api.boardDeleteSessions(['s1', 's2']);
       check('A', 'unavailable is reported', out.unavailable, true);
       check('A', 'no Session is archived before the routes are known to exist', archivedThroughCore(), 0);
-      check('A', 'the only request is the empty-id capability probe', requests.slice(), ['POST /plugins/dsh-archived-chats/trash/purge {"ids":[]}']);
+      check('A', 'the only request is the empty-id capability probe', requests.slice(), ['POST /plugins/dsh-archived-chats/trash/purge {"sessionIds":[]}']);
       check('A', 'the probe verdict is cached as unusable', await api.getProbe(), false);
       check('A', 'nothing is reported as deleted', out.deleted.slice(), []);
     }
@@ -592,7 +592,7 @@ function runSuite(src, options = {}) {
       const requests = [];
       currentFetch = async (url, init) => {
         requests.push(record(url, init));
-        if (url.endsWith('/trash/purge') && init.body === '{"ids":[]}') return response(200, { ok: true, purged: [] });
+        if (url.endsWith('/trash/purge') && init.body === '{"sessionIds":[]}') return response(200, { ok: true, purged: [] });
         if (url.endsWith('/delete-all')) return response(200, { ok: true, trashed: ['s1', 's2'] });
         if (url.endsWith('/trash/purge')) return response(200, { ok: true, purged: ['s1', 's2'] });
         return response(500);
@@ -609,11 +609,45 @@ function runSuite(src, options = {}) {
       ]);
     }
 
+    // ---- B2: /delete-all answers "already-trashed" — the Session is already in the
+    // plugin's recycle store (a previous purge failed), so it must be PURGED, not failed
+    {
+      reset();
+      const requests = [];
+      currentFetch = async (url, init) => {
+        requests.push(record(url, init));
+        if (url.endsWith('/trash/purge') && init.body === '{"sessionIds":[]}') return response(200, { ok: true, purged: [] });
+        if (url.endsWith('/delete-all')) return response(200, { ok: false, trashed: [], failed: [{ id: 's3', reason: 'already-trashed' }] });
+        if (url.endsWith('/trash/purge')) return response(200, { ok: true, purged: ['s3'] });
+        return response(500);
+      };
+      const out = await api.boardDeleteSessions(['s3']);
+      check('B', 'already-trashed is purged instead of reported as failed', [out.deleted.slice(), out.failed.slice(), out.unavailable], [['s3'], [], false]);
+      check('B', 'the purge carries the already-trashed id', requests.filter((r) => r.includes('/trash/purge')).slice(-1)[0], 'POST /plugins/dsh-archived-chats/trash/purge {"sessionIds":["s3"]}');
+    }
+
+    // ---- B3: the Session is ALREADY archived when the clear starts (a previous failed
+    // delete stranded it there). A failed purge must still put it back, not leave it hidden.
+    {
+      reset(['s5']);
+      currentFetch = async (url, init) => {
+        if (url.endsWith('/trash/purge') && init.body === '{"sessionIds":[]}') return response(200, { ok: true, purged: [] });
+        if (url.endsWith('/delete-all')) return response(200, { ok: true, trashed: ['s5'] });
+        return response(405);
+      };
+      const out = await api.boardDeleteSessions(['s5']);
+      check('B', 'an already-archived Session is reported as archived, so it stays recoverable', out.archived.includes('s5'), true);
+      check('B', 'the archive is asked again (idempotent) so a stale snapshot cannot skip it', archivedThroughCore(), 1);
+      const undoable = out.archived.filter((id) => !out.deleted.includes(id));
+      const restored = await api.boardRestoreSessions(undoable);
+      check('B', 'the restore path puts it back', restored.restored.slice(), ['s5']);
+    }
+
     // ---- C: archived, then the purge dies — the Session must stay recoverable
     {
       reset();
       currentFetch = async (url, init) => {
-        if (url.endsWith('/trash/purge') && init.body === '{"ids":[]}') return response(200, { ok: true, purged: [] });
+        if (url.endsWith('/trash/purge') && init.body === '{"sessionIds":[]}') return response(200, { ok: true, purged: [] });
         if (url.endsWith('/delete-all')) return response(200, { ok: true, trashed: ['s9'] });
         return response(405);
       };
@@ -656,7 +690,7 @@ function runSuite(src, options = {}) {
     {
       reset();
       currentFetch = async (url, init) => {
-        if (url.endsWith('/trash/purge') && init.body === '{"ids":[]}') return response(200, { ok: true, purged: [] });
+        if (url.endsWith('/trash/purge') && init.body === '{"sessionIds":[]}') return response(200, { ok: true, purged: [] });
         return response(405);
       };
       const out = await api.boardDeleteSessions(['s9']);
