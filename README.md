@@ -85,7 +85,7 @@ kill -INT <pid>
 | 功能 | 机制 | 位置 |
 |---|---|---|
 | **润色** | `/polish` API，用当前会话的模型重写草稿（默认润色 / 自定义要求润色） | `conversation.input.left` 按钮 |
-| **提示词库** | `/prompt-library` API，持久化 `~/.dsh/prompts.json`；支持分组 / 搜索 / 增删改 / 一键插入 | `conversation.input.left` 按钮 |
+| **提示词库** | `/prompt-library` API，持久化 `~/.dsh/prompts.json`；支持分组 / 搜索 / 增删改 / 一键插入。插入按“粘贴”语义：输入框已有内容时先换行再追加，**不覆盖原草稿**（读不到 `useInput` 的旧构建回退读 Lexical contenteditable，避免把非空草稿当成空串） | `conversation.input.left` 按钮 |
 | **预测回复（建议条）** | `/suggest` API：把**你的上一条提问 + AI 的最后一条回复**一起给模型，要求三条覆盖**不同意图**（推进 / 追问原因 / 换做法）并跟随对话语言；带「预测回复」标签与 `1/2/3` 序号的胶囊按钮。**点击直接发送**（设置可改为"仅填入输入框"）；**Shift+点击**或 **Alt+Shift+1/2/3** 只填入不发送；**Alt+1/2/3** 快捷选择 | `conversation.input.dock` |
 
 ### 2. 布局与宽度（设置页 + 运行时）
@@ -272,6 +272,7 @@ kill -INT <pid>
 本插件的 **布局增强**（AI 消息无背景、用户气泡自适应、长消息折叠、面板让位、宽度设置）通过运行时 CSS 注入实现。用户消息相关选择器已改为**哈希无关**的后缀匹配（`[class*=_userStack]` / `[class*=_bubble]` / `[class*=_bubble] div`），因此不受 dsh 0.1.2 把用户气泡从 `dsh-client-ui-conversation` 迁到 `dsh-client-ui-chat`（哈希前缀 `gdEzaW_*` → `Sixlwa_*`）的影响；其余布局选择器仍依赖 dsh 客户端 bundle 的 **CSS-in-JS 哈希类名**（`wSkVaW_*` / `pXSMma_*`）。这些类名随 dsh 每次构建可能变化。
 
 - **实测版本**：`0.2.0-rc.2`（2026-09 全量审计：宿主 A1–A6 + 客户端 B1–B16 + 打包 C1–C4 共 26 项 + 2 个假设，原始证据见 `reports/compat-0.2.0/REPORT.md`）；此前实测版本为 `0.1.0-rc.7`、`0.1.1-rc.2`、`0.1.2-rc.1`、`0.1.5-rc.2`
+- **支持版本**：`dsh >=0.2.1-rc.1 <0.3.0`（见 `package.json` 的 `engines.dsh` / `peerDependencies`）；0.20.2 的提示词插入修复已在活体客户端 `0.2.2-rc.1` 上验证（既有草稿保留 + 换行追加）
 - **0.2.0 的实际情况（修正旧说法，别再按"哈希漂移"排查）**：`wSkVaW_*` / `pXSMma_*` 在 0.2.0 **仍然存在**（0.2.0 头部实测 `[class$="_tabs"]`=1 且类名就是 `wSkVaW_tabs`；插件代码里这两个前缀分别仍有 13 / 1 处引用），hero 布局与头部 tab 条照常命中。本轮真正静默失效的是 **D1 / D2 / D3** 三条（会话判据、宽度变量名、消息时间节点层级），与哈希前缀无关——详见下方「0.2.0-rc.2 兼容性修复（本轮）」。`VOzbGW_*` / `nArs4W_*` 插件已 0 引用（旧文档提到它们属清理前的记录）
 - **布局增强失效表现**：安装后 AI/用户消息样式无变化（无错误提示，功能静默不生效）
 - **处理方式**：布局失效时，其余功能（润色 / 提示词库 / 建议条 / 标题 / 消息工具条 / 工具耗时）不受影响；请提交 issue 附上你的 dsh 版本与 `document.querySelector('*[class]').className` 中对应的消息区类名前缀，我们会更新注入选择器。
@@ -463,6 +464,7 @@ node tools/board-ui-probe.mjs "$TOKEN" "$SESSION_ID" [/tmp/shot.png]   # 真界�
 node tools/board-archive-gate-test.mjs                        # B16 门禁回归网：清空不得先把会话归档（exit 0 = 39 条断言全过，组 0 + A–G）
 node tools/board-archive-gate-test.mjs --mutate <name>|all    # 负控：exit 0 = 变异被检出（不检出 = 这张网形同虚设）；all 在 shipped guard 是 layout (a) 时额外用内存生成的 layout (b) 等价重构再跑一遍（是 layout (b) 则只跑 1 源并打 note）
 node tools/context-logic-test.mjs                            # 上下文面板纯逻辑：系统提示拆分、压缩 shadow/surface 位置、注入过滤、截断上限、/compact 结果配对（exit 0 = 26 条断言）
+node tools/prompt-insert-logic-test.mjs                      # 提示词插入纯逻辑：已有草稿保留 + 单个换行分隔 + useInput 缺失时读 contenteditable 回退（exit 0 = 16 条断言）
 ```
 
 `board-logic-test.mjs` 从 `lib/client.js` 里把纯函数抠出来跑沙箱断言，不需要浏览器。`board-ui-probe.mjs` 用 puppeteer 驱动真实面板（拖拽、菜单、批量、折叠、搜索、新建/改名/勾选/删除自由待办卡、清空→撤销归档、刷新持久化）；**默认不碰会话**，加 `BOARD_PROBE_RUN=1` 才会真的走一遍"待办 → 建会话执行"（会新建一个会话，脚本会打印 id 方便清理），**会动真会话**，但结束时会把动过的都还原，并断言没有残留归档（会话被归档就会从侧栏消失，所以这个收尾很重要）。
