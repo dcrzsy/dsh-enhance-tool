@@ -1,6 +1,6 @@
 {
   "name": "dsh-enhance-tool",
-  "version": "0.20.4",
+  "version": "0.21.0",
   "private": false,
   "type": "module",
   "main": "lib/index.js",
